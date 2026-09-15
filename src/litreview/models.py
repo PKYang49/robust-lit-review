@@ -32,6 +32,10 @@ class ArticleMetadata(BaseModel):
     citation_count: int = 0
     source_db: DatabaseSource = DatabaseSource.SCOPUS
 
+    # Study design, as indexed by PubMed (empty for other sources)
+    pub_types: list[str] = Field(default_factory=list)  # raw PublicationType values
+    pub_type: str = ""  # most informative single label, e.g. "RCT", "Observational"
+
     # Journal quality metrics
     citescore: float | None = None
     sjr: float | None = None
@@ -91,6 +95,12 @@ class SearchQuery(BaseModel):
     date_from: int | None = None
     date_to: int | None = None
     article_types: list[str] = Field(default_factory=lambda: ["article", "review"])
+    # Which databases this query is valid for; a query written in one engine's
+    # field syntax (PubMed's [pt], say) must not be sent to the others.
+    databases: list[str] = Field(default_factory=lambda: ["scopus", "pubmed", "embase"])
+    # Engine-specific sort expression (PubMed: "relevance"|"pub_date";
+    # Scopus: e.g. "-citedby-count"). None = the engine's default.
+    sort: str | None = None
 
 
 class ReviewStatistics(BaseModel):
@@ -150,6 +160,9 @@ class PICOQuestion(BaseModel):
     secondary_terms: list[str] = Field(default_factory=list)
     mesh_terms: list[str] = Field(default_factory=list)
     priority: int = 1
+    # "benefit": the claim is "intervention improves outcome" (beneficial -> supported)
+    # "harm":    the claim is "exposure increases risk"        (harmful   -> supported)
+    claim_direction: str = "benefit"
 
 
 class PicoPrismaFlow(BaseModel):
@@ -168,6 +181,11 @@ class PicoPrismaFlow(BaseModel):
     excluded_by_crossref: int = 0  # dropped: not found in CrossRef (possible hallucination)
     excluded_by_screen: int = 0
     excluded_reasons: dict[str, int] = Field(default_factory=dict)
+    # PRISMA 2020 "other methods" boxes, kept separate from database records
+    identified_by_citation: int = 0  # backward snowballing from included syntheses
+    included_by_citation: int = 0  # ...of which passed every gate and were added
+    identified_by_expert: int = 0  # studies a human named at the checkpoint
+    included_by_expert: int = 0
 
 
 class GradeDomain(BaseModel):
@@ -192,6 +210,13 @@ class GradeAssessment(BaseModel):
     n_studies: int = 0
     n_rct: int = 0
     summary: str = ""
+    # The studies the estimate actually rests on (citation keys, "@key"); the
+    # rest of the included set is context. Drives full-text retrieval.
+    body_of_evidence: list[str] = Field(default_factory=list)
+    # Populated by the full-text verification pass
+    fulltext_verified: list[str] = Field(default_factory=list)
+    rob_notes: dict[str, str] = Field(default_factory=dict)  # "@key" -> one-line risk-of-bias note
+    discrepancies: list[str] = Field(default_factory=list)  # abstract vs full text
 
 
 class OpenEvidenceCheck(BaseModel):

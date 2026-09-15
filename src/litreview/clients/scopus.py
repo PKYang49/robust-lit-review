@@ -54,17 +54,13 @@ class ScopusClient:
 
     @retry(wait=wait_exponential(min=1, max=30), stop=stop_after_attempt(3))
     async def _fetch_search_page(
-        self, query: str, start: int
+        self, query: str, start: int, sort: str | None = None
     ) -> dict:
         """Fetch a single page of Scopus search results."""
-        response = await self._client.get(
-            "/content/search/scopus",
-            params={
-                "query": query,
-                "start": start,
-                "count": self.RESULTS_PER_PAGE,
-            },
-        )
+        params: dict = {"query": query, "start": start, "count": self.RESULTS_PER_PAGE}
+        if sort:
+            params["sort"] = sort
+        response = await self._client.get("/content/search/scopus", params=params)
         response.raise_for_status()
         return response.json()
 
@@ -74,6 +70,7 @@ class ScopusClient:
         max_results: int = 100,
         date_from: int | None = None,
         date_to: int | None = None,
+        sort: str | None = None,
     ) -> list[dict]:
         """Search Scopus and return raw entry dicts, handling pagination.
 
@@ -87,6 +84,9 @@ class ScopusClient:
             When set, restricts to ``PUBYEAR > date_from - 1`` (i.e. >= date_from).
         date_to:
             When set, restricts to ``PUBYEAR < date_to + 1`` (i.e. <= date_to).
+        sort:
+            Scopus sort expression, e.g. ``"-citedby-count"`` (most cited
+            first). ``None`` leaves Scopus's default relevance ranking.
 
         Returns
         -------
@@ -103,7 +103,7 @@ class ScopusClient:
 
         try:
             while start < max_results:
-                data = await self._fetch_search_page(query, start)
+                data = await self._fetch_search_page(query, start, sort=sort)
                 results = data.get("search-results", {})
                 page_entries = results.get("entry", [])
 
@@ -226,6 +226,7 @@ class ScopusClient:
         max_results: int = 100,
         date_from: int | None = None,
         date_to: int | None = None,
+        sort: str | None = None,
     ) -> list[ArticleMetadata]:
         """Search Scopus and enrich results with journal metrics.
 
@@ -244,7 +245,7 @@ class ScopusClient:
             Enriched article metadata objects.
         """
         entries = await self.search(
-            query, max_results=max_results, date_from=date_from, date_to=date_to
+            query, max_results=max_results, date_from=date_from, date_to=date_to, sort=sort
         )
         articles: list[ArticleMetadata] = []
 
@@ -311,6 +312,7 @@ class ScopusClient:
             authors=authors,
             abstract=entry.get("dc:description", "") or "",
             doi=entry.get("prism:doi"),
+            pmid=entry.get("pubmed-id") or None,
             scopus_id=scopus_id or None,
             year=year,
             journal=entry.get("prism:publicationName", ""),

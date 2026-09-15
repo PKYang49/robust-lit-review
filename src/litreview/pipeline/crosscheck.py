@@ -84,7 +84,7 @@ def generate_crosscheck_task(
         description=f"OE cross-check: {pico.outcome_domain[:18]}",
         prompt=prompt,
         output_path=output_path,
-        model="sonnet",
+        model="opus",
     )
 
 

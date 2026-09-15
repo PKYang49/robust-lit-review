@@ -1,4 +1,4 @@
-"""GRADE certainty assessment per PICO via a Sonnet subagent.
+"""GRADE certainty assessment per PICO via an Opus subagent.
 
 Clones the llm_prisma_judge contract. The subagent rates the five GRADE
 downgrade domains; Python recomputes ``final_certainty`` deterministically from
@@ -7,7 +7,7 @@ label is treated as advisory only).
 
 Usage from SKILL.md:
 1. Python: task = generate_grade_task(pico, included_studies, extracted, output_dir)
-2. Claude Code: dispatch Agent(model="sonnet", prompt=task.prompt)
+2. Claude Code: dispatch Agent(model="opus", prompt=task.prompt)
 3. Python: grade = collect_grade(pico, output_dir)
 """
 
@@ -47,7 +47,10 @@ def compute_final_certainty(starting_level: str, total_change: int) -> str:
 
 def _study_line(article: ArticleMetadata, data: ExtractedData | None) -> str:
     bits = [f"@{article.citation_key}"]
-    if data and data.study_type:
+    # PubMed's own indexing outranks the extractor's guess at the design.
+    if article.pub_type:
+        bits.append(article.pub_type)
+    elif data and data.study_type:
         bits.append(data.study_type)
     if data and data.sample_sizes:
         bits.append(data.sample_sizes[0])
@@ -68,7 +71,7 @@ def generate_grade_task(
     extracted: dict[str, ExtractedData] | None,
     output_dir: Path,
 ) -> SubagentTask:
-    """Generate the Sonnet GRADE task for one PICO.
+    """Generate the Opus GRADE task for one PICO.
 
     Args:
         extracted: optional map of citation_key -> ExtractedData (from
@@ -90,24 +93,36 @@ def generate_grade_task(
         f"Comparator: {pico.comparator}\nOutcome: {pico.outcome}\n\n"
         "INCLUDED STUDIES (one per line):\n"
         f"{study_lines}\n\n"
-        "Start at HIGH certainty if the body of evidence is RCT-dominant, or LOW if "
+        "First identify the BODY OF EVIDENCE: the studies whose population, intervention, "
+        "comparator and outcome match this PICO. Studies in the list that address a "
+        "different population (e.g. HFrEF when the PICO is HFpEF), a different "
+        "intervention, or only a surrogate outcome are context — set them aside; do NOT "
+        "downgrade for indirectness merely because the search returned them. "
+        "Indirectness is rated on the studies you actually use for the estimate.\n\n"
+        "Start at HIGH certainty if that body of evidence is RCT-dominant, or LOW if "
         "observational-dominant (state which). For each of the 5 domains, rate "
         "not_serious / serious / very_serious with a downgrade of 0 / -1 / -2 and a "
-        "one-sentence justification grounded in the studies above:\n"
-        "  risk_of_bias, inconsistency, indirectness, imprecision, publication_bias\n\n"
+        "one-sentence justification grounded in the studies you used:\n"
+        "  risk_of_bias, inconsistency, indirectness, imprecision, publication_bias\n"
+        "If the body of evidence is observational, also consider the GRADE upgrades "
+        "(large_effect +1/+2, dose_response +1, plausible_confounding +1) and list any "
+        "that apply under \"upgrades\" with the same fields (downgrade holds the positive step).\n\n"
         "Also state the overall effect_direction for the intervention on this outcome: "
         "beneficial | no_effect | harmful | mixed.\n\n"
         "Return ONLY this JSON (no markdown). Write it to: "
         f"{output_path}\n"
         "{\n"
+        '  "body_of_evidence": ["@key", "..."],\n'
         '  "starting_level": "high|low",\n'
         '  "domains": [\n'
         '    {"name": "risk_of_bias", "rating": "not_serious|serious|very_serious", '
         '"downgrade": 0, "justification": "...", "evidence_refs": ["@key"]}\n'
         "  ],\n"
+        '  "upgrades": [],\n'
         '  "effect_direction": "beneficial|no_effect|harmful|mixed",\n'
         '  "final_certainty": "high|moderate|low|very_low",\n'
-        '  "n_studies": 0, "n_rct": 0, "summary": "one-to-two sentence GRADE narrative"\n'
+        '  "n_studies": 0, "n_rct": 0, "summary": "one-to-two sentence GRADE narrative "\n'
+        '                                     "naming the studies that form the body of evidence"\n'
         "}"
     )
 
@@ -116,12 +131,16 @@ def generate_grade_task(
         description=f"GRADE: {pico.outcome_domain[:20]}",
         prompt=prompt,
         output_path=output_path,
-        model="sonnet",
+        model="opus",
     )
 
 
-def collect_grade(pico: PICOQuestion, output_dir: Path) -> GradeAssessment:
-    """Parse the GRADE result; recompute final_certainty deterministically."""
+def collect_grade(
+    pico: PICOQuestion,
+    output_dir: Path,
+    authoritative_body: list[str] | None = None,
+) -> GradeAssessment:
+    """Parse GRADE, recompute certainty, and optionally enforce screened studies."""
     output_path = output_dir / f"grade_{pico.pico_id}.json"
     raw = parse_json_result(output_path)
 
@@ -170,6 +189,18 @@ def collect_grade(pico: PICOQuestion, output_dir: Path) -> GradeAssessment:
     if effect not in ("beneficial", "no_effect", "harmful", "mixed"):
         effect = "no_effect"
 
+    body = [str(k) for k in raw.get("body_of_evidence", []) or [] if k]
+    if "body_of_evidence" not in raw:
+        # Older outputs: the studies cited across the domain justifications.
+        body = sorted({ref for d in domains for ref in d.evidence_refs})
+    if authoritative_body is not None:
+        allowed = {k.lstrip("@"): k for k in authoritative_body}
+        body = [
+            f"@{key}"
+            for key in dict.fromkeys(k.lstrip("@") for k in body)
+            if key in allowed
+        ]
+
     assessment = GradeAssessment(
         pico_id=pico.pico_id,
         starting_level=starting_level,
@@ -180,8 +211,14 @@ def collect_grade(pico: PICOQuestion, output_dir: Path) -> GradeAssessment:
         n_studies=int(raw.get("n_studies", 0) or 0),
         n_rct=int(raw.get("n_rct", 0) or 0),
         summary=str(raw.get("summary", "")),
+        body_of_evidence=body,
+        fulltext_verified=[str(k) for k in raw.get("fulltext_verified", []) or [] if k],
+        rob_notes={str(k): str(v) for k, v in (raw.get("rob_notes") or {}).items()},
+        discrepancies=[str(d) for d in raw.get("discrepancies", []) or [] if d],
     )
-    logger.info(
+    # Debug, not info: this runs on every read of the stored result (status,
+    # next, render), where it reads as if the rating were being redone.
+    logger.debug(
         "GRADE %s: start=%s change=%d -> %s (effect=%s)",
         pico.pico_id, starting_level, total_change, final_certainty, effect,
     )

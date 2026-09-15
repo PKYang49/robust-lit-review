@@ -112,3 +112,28 @@ def filter_crossref_verified(
         else:
             dropped.append(a)
     return kept, dropped
+
+
+async def fetch_reference_dois(doi: str, mailto: str = "") -> list[str]:
+    """DOIs in a work's CrossRef reference list (lower-cased, deduplicated).
+
+    Publisher-deposited reference lists are far more complete than PubMed's
+    ``pubmed_pubmed_refs`` link (13/13 vs 5/13 meta-analyses in a test set), so
+    backward citation searching runs on CrossRef. Returns ``[]`` when the work
+    is unknown or has no deposited references.
+    """
+    headers = {"User-Agent": f"robust-lit-review/1.0 (mailto:{mailto or 'anonymous'})"}
+    try:
+        async with httpx.AsyncClient(timeout=30, headers=headers, follow_redirects=True) as client:
+            message = await _fetch_crossref(client, doi)
+    except Exception as e:  # noqa: BLE001 — a missing list is "no refs", not a crash
+        logger.warning("CrossRef reference lookup failed for %s: %s", doi, e)
+        return []
+    if not message:
+        return []
+    seen: list[str] = []
+    for ref in message.get("reference", []) or []:
+        d = (ref.get("DOI") or "").strip().lower()
+        if d and d not in seen:
+            seen.append(d)
+    return seen

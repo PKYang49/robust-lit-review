@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .venv/
+.evidence-brief/
+.pytest_cache/
 dist/
 *.egg-info/
 .quarto/
@@ -24,3 +26,6 @@ manuscript/*.html
 manuscript/*.tex
 manuscript/*.log
 manuscript/*.aux
+
+# downloaded full-text PDFs (copyright) — keep the markdown index, not the files
+output/**/fulltext/pdf/

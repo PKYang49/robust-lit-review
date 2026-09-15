@@ -45,11 +45,17 @@ class LitReviewPipeline:
 
     async def __aenter__(self):
         keys = self.config.validate_keys()
-        if keys["scopus"]:
+        # A database is queried only when it is both enabled and has a key.
+        enabled = set(self.config.databases)
+        if keys["scopus"] and "scopus" in enabled:
             self._scopus = ScopusClient(self.config.scopus_api_key)
-        if keys["pubmed"]:
-            self._pubmed = PubMedClient(self.config.pubmed_api_key)
-        if keys["embase"]:
+        if "pubmed" in enabled:
+            # PubMed needs no key: tool+email identification is enough (3 req/s).
+            self._pubmed = PubMedClient(
+                self.config.pubmed_api_key,
+                email=self.config.pubmed_email or self.config.unpaywall_email,
+            )
+        if keys["embase"] and "embase" in enabled:
             self._embase = EmbaseClient(self.config.embase_api_key)
         if keys["unpaywall"]:
             self._unpaywall = UnpaywallClient(self.config.unpaywall_email)
@@ -99,18 +105,22 @@ class LitReviewPipeline:
         # None (no change), the claim pipeline sets date_from=min_year.
         date_from = queries[0].date_from if queries else None
         date_to = queries[0].date_to if queries else None
+        targets = set(queries[0].databases) if queries else set()
+        sort = queries[0].sort if queries else None
 
-        if self._scopus and primary_query:
+        if self._scopus and primary_query and "scopus" in targets:
             logger.info("Searching Scopus...")
             tasks.append(self._scopus.search_and_enrich(
-                primary_query, self.config.max_results_per_db, date_from=date_from, date_to=date_to))
+                primary_query, self.config.max_results_per_db, date_from=date_from, date_to=date_to,
+                sort=sort))
 
-        if self._pubmed and primary_query:
+        if self._pubmed and primary_query and "pubmed" in targets:
             logger.info("Searching PubMed...")
             tasks.append(self._pubmed.search_and_fetch(
-                primary_query, self.config.max_results_per_db, date_from=date_from, date_to=date_to))
+                primary_query, self.config.max_results_per_db, date_from=date_from, date_to=date_to,
+                sort=sort or "relevance"))
 
-        if self._embase and primary_query:
+        if self._embase and primary_query and "embase" in targets:
             logger.info("Searching Embase...")
             tasks.append(self._embase.search_and_enrich(
                 primary_query, self.config.max_results_per_db, date_from=date_from, date_to=date_to))
@@ -126,6 +136,25 @@ class LitReviewPipeline:
         logger.info(f"Total articles found across all databases: {len(all_articles)}")
         return all_articles
 
+    @staticmethod
+    def _merge_duplicate(keep: ArticleMetadata, other: ArticleMetadata) -> None:
+        """Copy onto *keep* whatever *other* knows that *keep* lacks.
+
+        The same paper arrives from several engines with complementary
+        metadata — PubMed has the publication type and abstract, Scopus the
+        citation count and CiteScore — so the survivor must carry the union.
+        """
+        for field in ("pmid", "scopus_id", "issn", "year", "volume", "issue", "pages",
+                      "pub_type", "citescore", "sjr", "snip", "journal_quartile", "oa_url"):
+            if not getattr(keep, field) and getattr(other, field):
+                setattr(keep, field, getattr(other, field))
+        if not keep.pub_types and other.pub_types:
+            keep.pub_types = list(other.pub_types)
+        if not keep.abstract and other.abstract:
+            keep.abstract = other.abstract
+        keep.citation_count = max(keep.citation_count, other.citation_count)
+        keep.is_open_access = keep.is_open_access or other.is_open_access
+
     def deduplicate(self, articles: list[ArticleMetadata]) -> list[ArticleMetadata]:
         """Deduplicate articles by DOI, keeping the one with most metadata."""
         seen_dois: dict[str, ArticleMetadata] = {}
@@ -136,9 +165,12 @@ class LitReviewPipeline:
                 doi_lower = article.doi.lower().strip()
                 if doi_lower in seen_dois:
                     existing = seen_dois[doi_lower]
-                    # Keep the one with more metadata
+                    # Keep the one with more metadata, merging the rest in
                     if len(article.abstract) > len(existing.abstract):
+                        self._merge_duplicate(article, existing)
                         seen_dois[doi_lower] = article
+                    else:
+                        self._merge_duplicate(existing, article)
                 else:
                     seen_dois[doi_lower] = article
             else:

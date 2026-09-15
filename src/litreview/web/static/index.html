@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#183e3b">
+  <meta name="description" content="Evidence Brief：將臨床問題轉為可追溯的文獻證據摘要。">
+  <title>Evidence Brief · 臨床證據查詢</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23183e3b'/%3E%3Cpath d='M19 18h26M19 32h20M19 46h26' stroke='%23f5f3eb' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a href="#main" class="skip-link">跳至主要內容</a>
+  <div id="auth-screen" class="auth-screen">
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p class="eyebrow">EVIDENCE BRIEF</p>
+      <h1 id="auth-title">你的臨床證據工作站</h1>
+      <p class="muted">登入後，在電腦、平板與手機接續查詢。</p>
+      <p id="auth-status" role="status" class="muted">正在連線…</p>
+      <form id="login-form" hidden>
+        <label for="password">存取密碼</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="輸入此工作站的密碼">
+        <p id="login-error" class="form-error" role="alert"></p>
+        <button type="submit" class="button primary full-width">登入工作站 <span aria-hidden="true">→</span></button>
+      </form>
+      <button id="connection-retry" type="button" class="button secondary full-width" hidden>重新連線</button>
+      <div class="auth-footnote"><span class="status-dot" aria-hidden="true"></span> 同一工作站 · 同步查詢紀錄</div>
+    </section>
+  </div>
+  <div id="workspace" class="workspace" hidden>
+    <aside class="sidebar" aria-label="查詢紀錄">
+      <a class="brand" href="#" aria-label="Evidence Brief 首頁"><span class="brand-mark small" aria-hidden="true"><span></span><span></span><span></span></span><span>Evidence<br><strong>Brief<span class="brand-period">.</span></strong></span></a>
+      <p class="sidebar-caption">從臨床問題，到可追溯的證據。</p>
+      <button id="new-query" type="button" class="button primary full-width"><span aria-hidden="true">＋</span> 新增查詢</button>
+      <div class="history-heading"><h2>查詢紀錄</h2><span id="history-count" class="count">0</span></div>
+      <label class="sr-only" for="history-search">搜尋查詢紀錄</label>
+      <div class="search-box"><span aria-hidden="true">⌕</span><input id="history-search" type="search" placeholder="搜尋紀錄…" autocomplete="off"></div>
+      <nav id="history-list" class="history-list" aria-label="歷史查詢"></nav>
+      <div class="sidebar-footer"><div class="workspace-label"><span class="status-dot" aria-hidden="true"></span> 私人證據工作站</div><button id="logout" type="button" class="text-button">登出 <span aria-hidden="true">↗</span></button></div>
+    </aside>
+    <main id="main" tabindex="-1">
+      <header class="topbar"><span class="topbar-label">臨床研究 / <strong>證據查詢</strong></span><button id="refresh" class="button quiet" type="button"><span aria-hidden="true">↻</span><span>重新整理</span></button></header>
+      <div id="global-alert" class="alert error" role="alert" hidden></div>
+      <div id="config-warning" class="alert warning" role="status" hidden></div>
+      <div id="worker-warning" class="alert warning" role="status" hidden></div>
+      <div id="welcome" class="welcome">
+        <div class="hero"><div class="eyebrow"><span class="tiny-line" aria-hidden="true"></span> CLINICAL EVIDENCE, CONNECTED</div><h1>好的臨床問題，<br>值得<strong>清楚的證據。</strong></h1><p>提出問題、確認 PICO，再讓文獻搜尋與評讀<br class="desktop-break">帶你走向可追溯的證據摘要。</p><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="paper-art"><i></i><i></i><i></i><span>e</span></div><span class="art-dot"></span><span class="art-cross">＋</span></div></div>
+        <section class="query-card" aria-labelledby="query-title"><div class="section-heading"><div><span class="section-kicker">START A NEW BRIEF</span><h2 id="query-title">你想了解什麼臨床問題？</h2></div><span class="small-tag">中英文皆可</span></div>
+          <form id="query-form"><label class="sr-only" for="question">臨床問題</label><textarea id="question" name="question" minlength="5" maxlength="2000" rows="4" required placeholder="例如：對於射出分率保留型心衰竭患者，SGLT2 抑制劑能否降低住院與心血管死亡風險？" aria-describedby="question-help question-count"></textarea><div class="query-bottom"><div><p id="question-help">描述族群、介入措施與關心的結果。</p><span id="question-count" class="character-count">0 / 2,000</span></div><button id="query-submit" type="submit" class="button primary">建立證據查詢 <span aria-hidden="true">↗</span></button></div></form>
+        </section>
+        <div class="example-row"><span>從一個問題開始</span><button type="button" class="example-chip" data-question="對於射出分率保留型心衰竭患者，SGLT2 抑制劑能否降低住院與心血管死亡風險？">心衰竭與 SGLT2i <span aria-hidden="true">↗</span></button><button type="button" class="example-chip" data-question="對於心房顫動且接受冠狀動脈介入治療的患者，雙重抗血栓治療相較三重治療，對出血與缺血事件有何影響？">心房顫動抗血栓治療 <span aria-hidden="true">↗</span></button></div>
+        <section class="workflow" aria-labelledby="workflow-title"><div class="workflow-top"><h2 id="workflow-title">每一步，都有依據</h2><span>保留你的專業判斷</span></div><div class="workflow-grid"><article><span class="workflow-number">01</span><h3>釐清問題</h3><p>拆解 PICO，確認族群、介入<br>與預期結果。</p></article><article><span class="workflow-number">02</span><h3>搜尋與核對</h3><p>搜尋文獻後由 Opus 自動核對<br>納入研究，再繼續評讀。</p></article><article><span class="workflow-number">03</span><h3>閱讀證據摘要</h3><p>查看結論、證據品質<br>與可追溯的來源。</p></article></div></section>
+        <footer class="page-footer"><span>Evidence Brief</span><span>為臨床思考保留空間。</span></footer>
+      </div>
+      <section id="brief-view" class="brief-view" aria-label="查詢詳情" hidden></section>
+    </main>
+  </div>
+  <div id="announcement" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <noscript><div class="noscript">此查詢頁面需要啟用 JavaScript 才能登入及使用。</div></noscript>
+</body>
+</html>

@@ -25,13 +25,19 @@ def _downgrade_one(certainty: str) -> str:
     return _LEVELS[max(0, idx - 1)]
 
 
-def map_verdict(certainty: str, effect_direction: str) -> str:
-    """Map (certainty, effect_direction) to supported/uncertain/refuted."""
+def map_verdict(certainty: str, effect_direction: str, claim_direction: str = "benefit") -> str:
+    """Map (certainty, effect_direction) to supported/uncertain/refuted.
+
+    ``claim_direction`` says what the claim asserts: "benefit" (X improves the
+    outcome) or "harm" (X increases risk). The effect that confirms the claim
+    is "beneficial" for the former and "harmful" for the latter.
+    """
     if certainty not in _GOOD_CERTAINTY or effect_direction == "mixed":
         return "uncertain"
-    if effect_direction == "beneficial":
+    confirms = "harmful" if claim_direction == "harm" else "beneficial"
+    if effect_direction == confirms:
         return "supported"
-    if effect_direction in ("no_effect", "harmful"):
+    if effect_direction in ("no_effect", "beneficial", "harmful"):
         return "refuted"
     return "uncertain"
 
@@ -41,10 +47,11 @@ def assemble_verdict(
     crosscheck: OpenEvidenceCheck | None,
     plain_language_en: str = "",
     plain_language_lay_en: str = "",
+    claim_direction: str = "benefit",
 ) -> Verdict:
     """Build the final Verdict for a PICO from its GRADE + cross-check."""
     confidence = grade.final_certainty
-    verdict = map_verdict(confidence, grade.effect_direction)
+    verdict = map_verdict(confidence, grade.effect_direction, claim_direction)
     dissent = ""
 
     if crosscheck is not None and crosscheck.agreement == "disagree":

@@ -1,0 +1,23 @@
+name = "evidence-brief-relay"
+main = "src/index.ts"
+compatibility_date = "2026-09-15"
+workers_dev = true
+preview_urls = false
+
+[vars]
+TEAM_DOMAIN = "dark-union-5684.cloudflareaccess.com"
+# Use this application's Access audience, not JournalFetcher's audience.
+POLICY_AUD = "d813d3aab5d2fd4421ae906dcfc0f8559505f09c11584eec5b0f701b5d065053"
+PUBLIC_REPORT_BASE_URL = "https://evidence-brief-public.rivafann.workers.dev"
+
+[assets]
+directory = "../../src/litreview/web/static"
+binding = "ASSETS"
+# Authentication must run before every asset, HTML page, and API response.
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "evidence-brief"
+database_id = "690dec95-2833-46c1-ba65-15fbadd05409"
+migrations_dir = "migrations"

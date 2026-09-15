@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ question }}</title>
+<style>
+  :root {
+    --bg: #faf9f6; --fg: #1f1f1f; --muted: #6b6b6b; --line: #e4e1da; --card: #ffffff;
+    --supported: #2e7d4f; --supported-bg: #e6f4ea;
+    --uncertain: #a36a00; --uncertain-bg: #fff3d6;
+    --refuted: #b3261e; --refuted-bg: #fde8e6;
+    --accent: #2b4c7e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.7 -apple-system, "PingFang TC", "Noto Sans TC", "Helvetica Neue", sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.6rem; line-height: 1.35; margin: 0 0 12px; }
+  h2 { font-size: 1.2rem; margin: 40px 0 12px; }
+  h3 { font-size: 1.05rem; margin: 20px 0 8px; }
+  p { margin: 0 0 12px; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; }
+  .badge { font-size: .78rem; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px;
+           background: var(--card); color: var(--muted); }
+  .chip { display: inline-block; font-weight: 600; font-size: .9rem; padding: 3px 12px; border-radius: 999px; }
+  .chip.supported { color: var(--supported); background: var(--supported-bg); }
+  .chip.uncertain { color: var(--uncertain); background: var(--uncertain-bg); }
+  .chip.refuted   { color: var(--refuted);   background: var(--refuted-bg); }
+  .pips { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 8px; }
+  .pips i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: inline-block; }
+  .pips i.on { background: var(--accent); }
+  .overall { margin: 20px 0 0; padding: 18px 20px; background: var(--card); border: 1px solid var(--line);
+             border-radius: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .overall .label { color: var(--muted); font-size: .9rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 22px 24px; margin: 18px 0; }
+  .card .q { color: var(--muted); font-size: .9rem; margin-bottom: 6px; }
+  .card .headline { font-size: 1.15rem; font-weight: 600; margin: 10px 0 14px; line-height: 1.5; }
+  .verdict-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: .9rem; color: var(--muted); }
+  details { margin: 14px 0 0; border-top: 1px dashed var(--line); padding-top: 10px; }
+  summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+  details > *:not(summary) { margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 8px 0 4px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  .num { color: var(--muted); white-space: nowrap; }
+  .flow { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .flow b { color: var(--fg); font-weight: 600; }
+  .dissent { border-left: 3px solid var(--uncertain); padding: 6px 12px; background: var(--uncertain-bg);
+             border-radius: 0 8px 8px 0; font-size: .92rem; }
+  .grade-table td:nth-child(2) { white-space: nowrap; }
+  ol.refs { padding-left: 1.6em; font-size: .9rem; }
+  ol.refs li { margin-bottom: 8px; }
+  ol.refs a { color: var(--accent); word-break: break-all; }
+  sup a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .disclaimer { margin-top: 48px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px;
+                font-size: .85rem; color: var(--muted); background: var(--card); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16171a; --fg: #ececec; --muted: #a2a2a2; --line: #2e3035; --card: #1e2024;
+      --supported-bg: #163d29; --uncertain-bg: #3d2f0b; --refuted-bg: #43201d; --accent: #8db3ff;
+      --supported: #7fd3a3; --uncertain: #ffcf6e; --refuted: #ff9d95; }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16171a; --fg: #ececec; --muted: #a2a2a2; --line: #2e3035; --card: #1e2024;
+    --supported-bg: #163d29; --uncertain-bg: #3d2f0b; --refuted-bg: #43201d; --accent: #8db3ff;
+    --supported: #7fd3a3; --uncertain: #ffcf6e; --refuted: #ff9d95; }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{ question }}</h1>
+  <div class="meta">實證簡報 · {{ generated }}</div>
+  <div class="badges">
+    <span class="badge">PubMed</span>
+    <span class="badge">≥ {{ min_year }} 年</span>
+    <span class="badge">Q1 期刊</span>
+    <span class="badge">DOI 可解析</span>
+    <span class="badge">CrossRef 確認存在</span>
+    <span class="badge">GRADE 確定性</span>
+  </div>
+
+  <div class="overall">
+    <span class="label">整體判斷</span>
+    <span class="chip {{ overall_verdict }}">{{ overall_verdict_zh }}</span>
+    <span class="label">證據確定性：{{ overall_certainty_zh }}
+      <span class="pips" aria-label="certainty {{ overall_pips }} of 4">{% for i in range(4) %}<i class="{{ 'on' if i < overall_pips }}"></i>{% endfor %}</span>
+    </span>
+    <span class="label">· {{ picos|length }} 個子問題</span>
+  </div>
+
+  {% for p in picos %}
+  <section class="card" id="{{ p.pico_id }}">
+    <div class="q">子問題 {{ loop.index }}</div>
+    <h3 style="margin-top:0">{{ p.question }}</h3>
+    <div class="verdict-row">
+      <span class="chip {{ p.verdict }}">{{ p.verdict_zh }}</span>
+      <span>確定性：{{ p.certainty_zh }}
+        <span class="pips">{% for i in range(4) %}<i class="{{ 'on' if i < p.pips }}"></i>{% endfor %}</span>
+      </span>
+      <span>· 效果方向：{{ p.effect_zh }}</span>
+      <span>· {{ p.n_studies }} 篇納入{% if p.n_rct %}（{{ p.n_rct }} 篇 RCT）{% endif %}</span>
+      {% if p.fulltext_total %}<span>· 全文複核 {{ p.fulltext_ok }}／{{ p.fulltext_total }}</span>{% else %}<span>· 摘要層級</span>{% endif %}
+    </div>
+
+    <div class="headline">{{ p.headline }}</div>
+    {{ p.lay_html }}
+
+    {% if p.dissent %}
+    <div class="dissent"><strong>寫作者的異議：</strong>{{ p.dissent }}</div>
+    {% endif %}
+
+    {% if p.key_studies %}
+    <details open>
+      <summary>關鍵研究</summary>
+      <table>
+        <thead><tr><th>#</th><th>年</th><th>設計</th><th>樣本</th><th>發現</th><th title="已讀全文">全文</th></tr></thead>
+        <tbody>
+        {% for s in p.key_studies %}
+          <tr>
+            <td class="num"><a href="#ref-{{ s.n_ref }}">{{ s.n_ref }}</a></td>
+            <td class="num">{{ s.year or '' }}</td>
+            <td>{{ s.design }}</td>
+            <td class="num">{{ s.n }}</td>
+            <td>{{ s.finding }}</td>
+            <td class="num">{{ '✓' if s.fulltext else '' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+
+    <details>
+      <summary>專業版摘要</summary>
+      {{ p.pro_html }}
+      {% if p.caveats_html %}<p><strong>限制與注意：</strong></p>{{ p.caveats_html }}{% endif %}
+    </details>
+
+    <details>
+      <summary>GRADE 評分細節</summary>
+      <p class="meta">起始等級：{{ p.starting_level }}（{{ '以 RCT 為主' if p.starting_level == 'high' else '以觀察性研究為主' }}）</p>
+      {% if p.body_of_evidence %}<p class="meta">Body of evidence：{{ p.body_of_evidence|join('、') }}</p>{% endif %}
+      {% if p.screen_excluded %}
+      <details>
+        <summary>篩選排除（{{ p.screen_excluded|length }} 篇）</summary>
+        <ul>{% for e in p.screen_excluded %}<li><span class="num">{{ e.citation_key }}</span> — {{ e.reason }}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+      <table class="grade-table">
+        <thead><tr><th>面向</th><th>評等</th><th>降級</th><th>理由</th></tr></thead>
+        <tbody>
+        {% for d in p.grade_domains %}
+          <tr><td>{{ d.name }}</td><td>{{ d.rating }}</td><td class="num">{{ d.downgrade }}</td><td>{{ d.why }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if p.rob_notes %}
+      <p><strong>全文複核 — 偏差風險（Methods）</strong></p>
+      <table>
+        <tbody>
+        {% for r in p.rob_notes %}<tr><td class="num">{{ r.key }}</td><td>{{ r.note }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if p.discrepancies %}
+      <p><strong>摘要與全文的落差</strong></p>
+      <ul>{% for d in p.discrepancies %}<li>{{ d }}</li>{% endfor %}</ul>
+      {% endif %}
+    </details>
+
+    <details>
+      <summary>檢索流程</summary>
+      <p class="flow">
+        PubMed 檢索 <b>{{ p.flow.total_found }}</b> →
+        去重 <b>{{ p.flow.after_dedup }}</b> →
+        ≥ {{ min_year }} 年 <b>{{ p.flow.after_year_filter }}</b> →
+        Q1 期刊 <b>{{ p.flow.after_quality_filter }}</b> →
+        DOI 可解析 <b>{{ p.flow.after_validation }}</b> →
+        CrossRef 確認 <b>{{ p.flow.after_crossref }}</b>
+        {% if p.flow.identified_by_citation %}→ 引用追溯 +<b>{{ p.flow.included_by_citation }}</b>／{{ p.flow.identified_by_citation }}{% endif %}
+        {% if p.flow.identified_by_expert %}→ 專家補件 +<b>{{ p.flow.included_by_expert }}</b>／{{ p.flow.identified_by_expert }}{% endif %}
+        → 納入 <b>{{ p.flow.included }}</b>
+      </p>
+    </details>
+  </section>
+  {% endfor %}
+
+  <h2>方法</h2>
+  <p>每個子問題各自以 PICO 建構 PubMed 檢索式（E-utilities），跑三次：PubMed 依相關性排序取前 N 筆、同一檢索式限定 RCT／統合分析／系統性回顧（publication type）補撈、Scopus 依被引用次數排序取前 N 筆，合併去重；再對納入的統合分析／系統性回顧做反向引用追溯（CrossRef 參考文獻），被至少兩篇引用的 RCT 經同樣閘門後納入；限 {{ min_year }} 年後發表；期刊需為 SJR Q1（Scimago 2024 查表，查不到者以 OpenAlex 指標估算，仍無法判定者排除）；DOI 須可經 doi.org 解析，且每篇文獻都經 CrossRef 確認存在。通過閘門的摘要再依 PICO 逐篇篩選，僅篩選納入的研究進入 GRADE；證據確定性依 GRADE 五個面向評定，最終等級由程式依降級分數重算。接著取得 body of evidence 的全文（經機構授權下載）重新核對偏差風險與數字；其餘研究以摘要為據。頁面上每一個引用都經比對，只允許出現在該子問題納入名單內的文獻。</p>
+
+  <h2>參考文獻</h2>
+  <ol class="refs">
+  {% for r in references %}
+    <li id="ref-{{ r.n }}">{{ r.text }}
+      {% if r.doi %}<a href="https://doi.org/{{ r.doi }}" target="_blank" rel="noopener">doi:{{ r.doi }}</a>{% endif %}
+      {% if r.pmid %}· <a href="https://pubmed.ncbi.nlm.nih.gov/{{ r.pmid }}/" target="_blank" rel="noopener">PubMed</a>{% endif %}
+    </li>
+  {% endfor %}
+  </ol>
+
+  <div class="disclaimer">
+    本頁由自動化流程產生：PubMed 檢索與篩選為程式執行，GRADE 評讀與文字由大型語言模型撰寫。所引用文獻均經 CrossRef 確認存在，但摘要與評讀內容仍可能有誤，請以原文為準。本頁不構成醫療建議。
+  </div>
+</main>
+</body>
+</html>

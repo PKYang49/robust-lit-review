@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
 semantic = [
     "sentence-transformers>=3.0",
     "torch>=2.0",
@@ -25,10 +29,23 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-httpx>=0.30",
     "ruff>=0.5",
+    "pyright>=1.1",
 ]
 
 [project.scripts]
 lit-review = "litreview.cli:app"
+evidence-brief-web = "litreview.web.app:main"
+evidence-brief-worker = "litreview.web.relay:main"
+
+[tool.setuptools.package-data]
+"litreview.web" = ["static/*"]
+
+[tool.pyright]
+include = ["src/litreview/web"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
 
 [tool.ruff]
 target-version = "py311"
