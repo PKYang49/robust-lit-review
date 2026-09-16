@@ -138,6 +138,11 @@ test("browser writes reject cross-site, oversized, non-JSON and invalid payloads
 
 test("PICO validation canonicalizes paths and bounds terms", () => {
   assert.equal(validatePicos([PICO])[0].pico_id, "pico_01");
+  const withLongMeshHeading = validatePicos([{ ...PICO,
+    mesh_terms: ["Drug-Related Side Effects and Adverse Reactions"],
+  }]);
+  assert.deepEqual(withLongMeshHeading[0].mesh_terms,
+    ["Drug-Related Side Effects and Adverse Reactions"]);
   for (const value of [[], [PICO, PICO, PICO, PICO], [{ ...PICO, primary_terms: [] }],
     [{ ...PICO, secondary_terms: Array(13).fill("term") }], [{ ...PICO, outcome: "one two three four five six" }],
     [{ ...PICO, claim_direction: "unknown" }], [{ ...PICO, population: "x".repeat(2001) }]]) {

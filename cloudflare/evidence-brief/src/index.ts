@@ -256,7 +256,10 @@ export function validatePicos(value: unknown): Data[] {
       rationale: string(pico.rationale ?? "", 2000, "理由"),
       primary_terms: list(pico.primary_terms, 12, "介入搜尋詞", 1).map(term),
       secondary_terms: list(pico.secondary_terms, 12, "結果搜尋詞", 1).map(term),
-      mesh_terms: list(pico.mesh_terms ?? [], 12, "MeSH 搜尋詞").map(term),
+      // MeSH headings can contain more than five words; only free-text
+      // search terms use the short-phrase limit enforced by `term`.
+      mesh_terms: list(pico.mesh_terms ?? [], 12, "MeSH 搜尋詞", 0)
+        .map(value => string(value, 150, "MeSH 搜尋詞", 1)),
       priority,
       claim_direction: direction,
     };
