@@ -650,7 +650,7 @@ Outcome: {outcome}
   效果方向：{effect_zh}
   GRADE 摘要：{grade_summary}
 
-納入研究（全部都是 Q1 期刊、{min_year} 年後、CrossRef 確認存在）在這個檔案：
+納入研究（{min_year} 年後、經期刊品質與 CrossRef 閘門；分級無法判定者可能保留）在這個檔案：
   {pico_json}
 請先完整讀它，再開始寫。
 {fulltext_note}
@@ -821,8 +821,15 @@ def _prose_to_html(text: str, ref_numbers: dict[str, int]) -> Markup:
     return Markup("\n".join(out))
 
 
-def render_brief(base: Path, output_path: Path | None = None) -> Path:
-    """Assemble ``brief.html`` from the JSON on disk. Refuses on unknown DOIs."""
+def render_brief(
+    base: Path, output_path: Path | None = None, *, min_year: int | None = None
+) -> Path:
+    """Assemble ``brief.html`` from the JSON on disk. Refuses on unknown DOIs.
+
+    ``min_year`` is passed by the per-job worker. For older CLI-created briefs,
+    fall back to the value persisted in ``picos.json`` and then the brief
+    default so the report remains traceable to the search window.
+    """
     question, picos = load_brief(base)
     pico_ids = [p.pico_id for p in picos]
 
@@ -908,7 +915,10 @@ def render_brief(base: Path, output_path: Path | None = None) -> Path:
                                        grade=grade, verdict=verdict))
 
     overall_verdict, overall_certainty = derive_overall(pico_results)
-    cfg = brief_config()
+    if min_year is None:
+        raw_picos = json.loads((base / "picos.json").read_text(encoding="utf-8"))
+        persisted_year = raw_picos.get("min_year") if isinstance(raw_picos, dict) else None
+        min_year = int(persisted_year) if persisted_year is not None else brief_config().min_year
     env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)),
                       autoescape=select_autoescape(["html", "j2"]))
     unranked_total = sum(card["n_unranked"] for card in pico_cards)
@@ -920,7 +930,7 @@ def render_brief(base: Path, output_path: Path | None = None) -> Path:
         overall_verdict_zh=VERDICT_ZH.get(overall_verdict, overall_verdict),
         overall_certainty_zh=CERTAINTY_ZH.get(overall_certainty, overall_certainty),
         overall_pips=_CERTAINTY_PIPS.get(overall_certainty, 1),
-        min_year=cfg.min_year,
+        min_year=min_year,
         picos=pico_cards,
         references=[
             {"n": i + 1, "text": _format_reference(a), "doi": a.doi, "pmid": a.pmid}

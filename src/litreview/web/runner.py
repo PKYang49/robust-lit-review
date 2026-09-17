@@ -431,8 +431,10 @@ class BriefWorker:
             # set and apply additions, but never stop and ask again.
             self._run_expert_checkpoint(job_id, base, payload.get("additions", []), force=True)
         if job["phase"] == "auto_checkpoint":
-            if self._run_expert_checkpoint(job_id, base):
-                return
+            # The five-minute timeout is the model's fallback decision. Run
+            # Opus again, then continue even when it still marks the set as
+            # needing human attention; no human response arrived in time.
+            self._run_expert_checkpoint(job_id, base, force=True)
         for _ in range(40):
             result = asyncio.run(brief_flow.run_next(base, self.cfg))
             self.store.update(job_id, states=[vars(s) for s in result.states], fulltext=result.fulltext_enabled)
@@ -457,8 +459,9 @@ class BriefWorker:
                                force: bool = False) -> bool:
         """Run the Opus checkpoint. Returns True when the run stopped for a person.
 
-        With *force* the checkpoint is recorded whatever the review says, which
-        is what a human-sent checkpoint command means.
+        With *force* the checkpoint is recorded whatever the review says. This
+        is used both for an explicit human continuation and for the timed
+        automatic continuation after five minutes without a response.
         """
         added_titles: list[str] = []
         rejected: dict[str, str] = {}

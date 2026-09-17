@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -198,7 +199,7 @@ def test_screen_missing_after_all_attempts_names_the_gap(tmp_path: Path, monkeyp
 
 
 # ---------------------------------------------------------------------------
-# Per-question year window and the halting expert checkpoint
+# Per-question year window and the expert checkpoint timeout fallback
 # ---------------------------------------------------------------------------
 
 def test_pico_draft_year_window_defaults_to_2000_and_is_bounded():
@@ -254,3 +255,37 @@ def test_expert_review_needs_human_halts_and_invites_a_decision(tmp_path: Path, 
     updates.clear()
     assert worker._run_expert_checkpoint("job", tmp_path, force=True) is False
     assert recorded and updates[-1]["status"] == "running"
+
+
+def test_timed_checkpoint_forces_model_continuation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from litreview.web.runner import BriefWorker
+
+    calls: list[tuple[str, bool]] = []
+
+    class _Store:
+        def get(self, _job_id: str):
+            return {"id": "job", "phase": "auto_checkpoint", "min_year": 2000}
+
+        def base(self, _job_id: str) -> Path:
+            return tmp_path
+
+        def update(self, _job_id: str, **_changes):
+            return _changes
+
+    worker = BriefWorker.__new__(BriefWorker)
+    worker.store = _Store()
+    worker.runner = None
+
+    def fake_checkpoint(job_id: str, _base: Path, *, force: bool = False):
+        calls.append((job_id, force))
+        return False
+
+    monkeypatch.setattr(worker, "_run_expert_checkpoint", fake_checkpoint)
+
+    async def completed(_base: Path, _cfg):
+        return SimpleNamespace(status="done", states=[], fulltext_enabled=False)
+
+    monkeypatch.setattr("litreview.web.runner.brief_flow.run_next", completed)
+    worker._execute("job")
+
+    assert calls == [("job", True)]

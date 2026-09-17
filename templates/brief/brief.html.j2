@@ -177,7 +177,7 @@
         PubMed 檢索 <b>{{ p.flow.total_found }}</b> →
         去重 <b>{{ p.flow.after_dedup }}</b> →
         ≥ {{ min_year }} 年 <b>{{ p.flow.after_year_filter }}</b> →
-        Q1 期刊 <b>{{ p.flow.after_quality_filter }}</b> →
+        {% if p.n_unranked %}Q1／未分級期刊{% else %}Q1 期刊{% endif %} <b>{{ p.flow.after_quality_filter }}</b> →
         DOI 可解析 <b>{{ p.flow.after_validation }}</b> →
         CrossRef 確認 <b>{{ p.flow.after_crossref }}</b>
         {% if p.flow.identified_by_citation %}→ 引用追溯 +<b>{{ p.flow.included_by_citation }}</b>／{{ p.flow.identified_by_citation }}{% endif %}
@@ -189,7 +189,7 @@
   {% endfor %}
 
   <h2>方法</h2>
-  <p>每個子問題各自以 PICO 建構 PubMed 檢索式（E-utilities），跑三次：PubMed 依相關性排序取前 N 筆、同一檢索式限定 RCT／統合分析／系統性回顧（publication type）補撈、Scopus 依被引用次數排序取前 N 筆，合併去重；再對納入的統合分析／系統性回顧做反向引用追溯（CrossRef 參考文獻），被至少兩篇引用的 RCT 經同樣閘門後納入；限 {{ min_year }} 年後發表；期刊需為 SJR Q1（Scimago 2024 查表，查不到者以 OpenAlex 指標估算）；{% if unranked_total %}分級仍無法判定的期刊不予排除，改以摘要篩選把關，並於上方標示篇數；{% endif %}DOI 須可經 doi.org 解析，且每篇文獻都經 CrossRef 確認存在。通過閘門的摘要再依 PICO 逐篇篩選，僅篩選納入的研究進入 GRADE；證據確定性依 GRADE 五個面向評定，最終等級由程式依降級分數重算。接著取得 body of evidence 的全文（經機構授權下載）重新核對偏差風險與數字；其餘研究以摘要為據。頁面上每一個引用都經比對，只允許出現在該子問題納入名單內的文獻。</p>
+  <p>每個子問題各自以 PICO 建構 PubMed 檢索式（E-utilities），跑三次：PubMed 依相關性排序取前 N 筆、同一檢索式限定 RCT／統合分析／系統性回顧（publication type）補撈、Scopus 依被引用次數排序取前 N 筆，合併去重；再對納入的統合分析／系統性回顧做反向引用追溯（CrossRef 參考文獻），被至少兩篇引用的 RCT 經同樣閘門後納入；限 {{ min_year }} 年後發表；期刊品質以 SJR Q1 為主要閘門（Scimago 2024 查表，查不到者以 OpenAlex 指標估算）；{% if unranked_total %}分級仍無法判定的期刊不予排除，改以摘要篩選把關，並於上方標示篇數；{% else %}本次納入期刊均已判定分級；{% endif %}DOI 須可經 doi.org 解析，且每篇文獻都經 CrossRef 確認存在。通過閘門的摘要再依 PICO 逐篇篩選，僅篩選納入的研究進入 GRADE；證據確定性依 GRADE 五個面向評定，最終等級由程式依降級分數重算。接著取得 body of evidence 的全文（經機構授權下載）重新核對偏差風險與數字；其餘研究以摘要為據。頁面上每一個引用都經比對，只允許出現在該子問題納入名單內的文獻。</p>
 
   <h2>參考文獻</h2>
   <ol class="refs">

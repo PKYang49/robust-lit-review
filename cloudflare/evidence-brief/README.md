@@ -55,12 +55,13 @@ Cloudflare does not call an LLM. After the Mac relay claims a query, Claude Code
 runs the LLM stages locally: Opus handles PICO drafting, GRADE, full-text
 verification, and writing; Haiku remains reserved for batched abstract
 screening. After the search, Opus automatically reviews the included studies
-and candidate gaps, then the pipeline continues without a user confirmation
-step. Any added study must come from the candidate list already returned by the
-search, so the review cannot invent a citation. Existing jobs left at the old
-manual checkpoint are also assigned to Opus after five minutes by the next
-online Mac relay poll; if the Mac is offline, the query waits until it
-reconnects.
+and candidate gaps, then the pipeline normally continues without a user
+confirmation step. If Opus determines that the included set cannot answer a
+PICO, it stops at a safety checkpoint and gives the user five minutes to
+respond. If there is no response, the next Mac relay poll asks Opus to review
+again and continues under that model decision. Any added study must come from
+the candidate list already returned by the search, so the review cannot invent
+a citation. If the Mac is offline, the query waits until it reconnects.
 
 ## Mac worker
 

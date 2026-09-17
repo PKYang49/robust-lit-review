@@ -354,7 +354,7 @@ async def run_next(base: Path, cfg: Config) -> NextResult:
             raise ValueError("writer cited DOIs outside the included set — " +
                              "; ".join(f"{k}: {', '.join(v)}" for k, v in problems.items()) +
                              ". Re-dispatch that writer with the offending list.")
-        result.rendered = render_brief(base)
+        result.rendered = render_brief(base, min_year=cfg.min_year)
         result.actions.append(f"rendered {result.rendered}")
         result.status = "rendered"
     else:

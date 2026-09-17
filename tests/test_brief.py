@@ -263,6 +263,8 @@ def test_writer_task_carries_frozen_verdict(base: Path):
     text = path.read_text(encoding="utf-8")
     assert "證據支持（supported）" in text
     assert "證據確定性：中（moderate）" in text
+    assert "分級無法判定者可能保留" in text
+    assert "全部都是 Q1" not in text
     assert str((base / "write_pico_01.json").resolve()) in text
 
 
@@ -311,6 +313,31 @@ def test_render_produces_numbered_citations_and_references(base: Path):
     assert "<script" not in html
     # flow counts made it through
     assert "CrossRef 確認 <b>2</b>" in html
+
+
+def test_render_uses_persisted_job_year_window(base: Path):
+    picos = json.loads((base / "picos.json").read_text(encoding="utf-8"))
+    picos["min_year"] = 2016
+    (base / "picos.json").write_text(json.dumps(picos, ensure_ascii=False), encoding="utf-8")
+    (base / "write_pico_01.json").write_text(json.dumps(_writeup(), ensure_ascii=False), encoding="utf-8")
+
+    html = brief.render_brief(base).read_text(encoding="utf-8")
+
+    assert "≥ 2016 年" in html
+    assert "限 2016 年後發表" in html
+    assert "≥ 2000 年" not in html
+
+
+def test_render_labels_unranked_journals_honestly(base: Path):
+    data = json.loads((base / "pico_01.json").read_text(encoding="utf-8"))
+    data["included_studies"][1]["journal_quartile"] = "Unknown"
+    (base / "pico_01.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    (base / "write_pico_01.json").write_text(json.dumps(_writeup(), ensure_ascii=False), encoding="utf-8")
+
+    html = brief.render_brief(base).read_text(encoding="utf-8")
+
+    assert "Q1／未分級期刊 <b>5</b>" in html
+    assert "分級仍無法判定的期刊不予排除" in html
 
 
 def test_render_escapes_writer_html(base: Path):
