@@ -280,7 +280,15 @@ def test_expert_review_needs_human_halts_and_invites_a_decision(tmp_path: Path, 
     monkeypatch.setattr(worker, "evidence", lambda _base: {"studies": {}, "gaps": {}})
     monkeypatch.setattr(BriefWorker, "_expert_review", lambda *_a, **_k: None, raising=False)
 
-    review = ExpertReview(note="pico_01 的納入研究多為錯誤族群。", needs_human=True)
+    review = ExpertReview(
+        note=(
+            "【pico_01】判斷：直接相關試驗存在；處理：摘要篩選；是否阻擋：否\n"
+            "【pico_02】判斷：MACE 定義不一致；處理：核對組成項目並排除錯誤族群；是否阻擋：是\n"
+            "【pico_03】判斷：安全性結果過於分散；處理：分開判讀不良事件；是否阻擋：是\n"
+            "補充說明：" + "x" * 500
+        ),
+        needs_human=True,
+    )
     monkeypatch.setattr(worker, "runner", type("R", (), {"expert_checkpoint": staticmethod(lambda _b: review)})())
     recorded: list = []
     monkeypatch.setattr("litreview.web.runner.brief_flow.record_checkpoint",
@@ -289,7 +297,10 @@ def test_expert_review_needs_human_halts_and_invites_a_decision(tmp_path: Path, 
     halted = worker._run_expert_checkpoint("job", tmp_path)
     assert halted is True
     assert updates[-1]["status"] == "checkpoint"          # the cloud accepts a checkpoint command here
-    assert "錯誤族群" in updates[-1]["message"]
+    assert "【pico_01】" in updates[-1]["message"]
+    assert "【pico_02】" in updates[-1]["message"]
+    assert "【pico_03】" in updates[-1]["message"]
+    assert len(updates[-1]["message"]) <= 1700 + len("需要你確認：\n")
     assert not recorded                                   # the stage stays locked
 
     # A person sending the checkpoint command overrides the halt.

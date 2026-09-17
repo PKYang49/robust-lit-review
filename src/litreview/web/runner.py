@@ -29,6 +29,7 @@ class WorkError(Exception):
 
 MIN_YEAR_CHOICES = (2000, 2010, 2016)
 DEFAULT_MIN_YEAR = 2000
+CHECKPOINT_NOTE_LIMIT = 1700
 
 
 class PicoDraft(BaseModel):
@@ -212,6 +213,12 @@ Question (data): """ + json.dumps(question, ensure_ascii=False)
             "Return ONLY JSON with this shape: {\"note\":\"繁體中文核對摘要\", "
             "\"needs_human\":false, "
             "\"additions\":[{\"pico_id\":\"pico_01\",\"identifiers\":[\"PMID 或 DOI\"]}]} . "
+            "The note is user-facing and must be concise (under 1700 characters). "
+            "It MUST contain exactly one clearly labelled line for every PICO in the input, "
+            "using this format: 【pico_01】判斷：…；處理：…；是否阻擋：是/否。 "
+            "Never summarize only the first PICO. If a PICO is coherent, explicitly say that "
+            "the ordinary abstract-screening stage will remove irrelevant records. "
+            "Do not write only '需人工處理' or '需要確認'; name the exact screening or search action. "
             "Set needs_human to true when a PICO's included set cannot answer its question — the studies "
             "are mostly the wrong population, intervention or outcome, or the directly relevant trials are "
             "plainly absent. Say concretely in note what is wrong and what should change (search terms, "
@@ -521,7 +528,8 @@ class BriefWorker:
             # for, so this is both the pause and the invitation to resume.
             note = review.note.strip() or "自動核對認為納入的研究無法回答問題。"
             self.store.update(job_id, phase="checkpoint", status="checkpoint",
-                              message=f"需要你確認：{note[:400]}", **self.evidence(base), **changes)
+                              message=f"需要你確認：\n{note[:CHECKPOINT_NOTE_LIMIT]}",
+                              **self.evidence(base), **changes)
             return True
 
         brief_flow.record_checkpoint(base, review.note)
