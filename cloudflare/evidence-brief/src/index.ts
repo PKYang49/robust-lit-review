@@ -318,6 +318,7 @@ function cleanSnapshot(value: unknown, row: JobRow): Data {
     studies: object(incoming.studies ?? {}, "文獻"),
     gaps: object(incoming.gaps ?? {}, "遺漏文獻"),
     events: list(incoming.events ?? [], 60, "處理紀錄"),
+    min_year: minYear(incoming.min_year),
     report_url: null,
   };
   if (incoming.additions_result !== undefined) result.additions_result = object(incoming.additions_result, "補充結果");

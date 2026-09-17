@@ -269,6 +269,20 @@ test("worker updates bound reports and reject invalid states or completed jobs w
   assert.equal((await f.send(`/briefs/${job.id}/report`)).status, 404);
 });
 
+test("worker snapshots preserve the selected year window", async t => {
+  const f = fixture(t);
+  await f.create();
+  const { job, lease_token } = await f.claim();
+  const response = await f.sync("update", {
+    id: job.id,
+    lease_token,
+    brief: { ...job, min_year: 2010 },
+  });
+  assert.equal(response.status, 200);
+  const row = f.db.prepare("SELECT snapshot FROM jobs WHERE id = ?").get(job.id) as { snapshot: string };
+  assert.equal(JSON.parse(row.snapshot).min_year, 2010);
+});
+
 test("heartbeat exposes capabilities and offline status without blocking new jobs", async t => {
   const f = fixture(t);
   let config = await (await f.send("/api/config")).json() as Data;
