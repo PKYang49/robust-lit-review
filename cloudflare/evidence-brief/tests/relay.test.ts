@@ -258,6 +258,35 @@ test("error and interrupted states can resume but unfinished work cannot release
   assert.equal((await f.send(`/api/briefs/${claimed.job.id}/resume`, {})).status, 409);
 });
 
+test("Discord error notifications include a retry button", async t => {
+  const f = fixture(t);
+  await f.create();
+  const claimed = await f.claim();
+  f.db.prepare("UPDATE jobs SET source = 'discord', discord_user_id = ?, discord_channel_id = ? WHERE id = ?")
+    .run("123456789", "987654321", claimed.job.id);
+  f.env.DISCORD_BOT_TOKEN = "bot-token";
+  const originalFetch = globalThis.fetch;
+  const requests: { url: string; body: Data }[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+    return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const response = await f.sync("update", {
+    id: claimed.job.id,
+    lease_token: claimed.lease_token,
+    brief: { ...claimed.job, status: "error", message: "PICO 格式需要重試。" },
+    finished: true,
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://discord.com/api/v10/channels/987654321/messages");
+  assert.equal(requests[0].body.components[0].components[0].custom_id,
+    `evidence:resume:${claimed.job.id}`);
+});
+
 test("worker updates bound reports and reject invalid states or completed jobs without reports", async t => {
   const f = fixture(t);
   await f.create();

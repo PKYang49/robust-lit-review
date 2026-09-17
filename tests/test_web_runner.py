@@ -47,6 +47,47 @@ def test_grade_output_without_pico_id_is_accepted(tmp_path: Path, monkeypatch: p
     assert json.loads((tmp_path / "grade_pico_01.json").read_text(encoding="utf-8"))["n_studies"] == 1
 
 
+def test_draft_repairs_overlong_search_terms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    runner = ClaudeRunner()
+    valid = {
+        "picos": [{
+            "population": "patients after myocardial infarction",
+            "intervention": "beta blockers",
+            "comparator": "no beta blocker",
+            "outcome": "all-cause mortality",
+            "outcome_domain": "mortality",
+            "question_text": "MI 後 LVEF 正常是否使用 beta blocker？",
+            "primary_terms": ["myocardial infarction", "preserved ejection fraction", "beta blockers"],
+            "secondary_terms": ["mortality", "cardiovascular death"],
+            "claim_direction": "benefit",
+        }],
+    }
+    invalid = {**valid, "picos": [{**valid["picos"][0],
+                                    "primary_terms": ["patients with a history of myocardial infarction"]}]}
+    answers = iter([invalid, valid])
+    prompts: list[str] = []
+    monkeypatch.setattr(runner, "complete", lambda prompt, _model: prompts.append(prompt) or next(answers))
+
+    draft = runner.draft("MI 後 LVEF 正常是否要使用 betablocker")
+
+    assert draft.picos[0].pico_id == "pico_01"
+    assert len(prompts) == 2
+    assert "failed validation" in prompts[1]
+
+
+def test_draft_reports_invalid_terms_after_repair_attempts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    runner = ClaudeRunner()
+    invalid = {"picos": [{
+        "population": "adults", "intervention": "beta blockers", "comparator": "usual care",
+        "outcome": "mortality", "question_text": "q", "primary_terms": ["too many words in this search term"],
+        "secondary_terms": ["mortality"], "claim_direction": "benefit",
+    }]}
+    monkeypatch.setattr(runner, "complete", lambda _prompt, _model: invalid)
+
+    with pytest.raises(WorkError, match="PICO 搜尋詞格式"):
+        runner.draft("question")
+
+
 def test_explicit_wrong_pico_id_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     runner = ClaudeRunner()
     answer = _grade_answer()

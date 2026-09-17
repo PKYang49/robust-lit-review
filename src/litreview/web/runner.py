@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from litreview.config import Config
 from litreview.models import PICOQuestion
@@ -126,6 +126,8 @@ class ClaudeRunner:
             return envelope["structured_output"]
         return parse_answer(str(envelope.get("result", "")))
 
+    DRAFT_REPAIR_ATTEMPTS = 2
+
     def draft(self, question: str) -> PicoDraft:
         prompt = """Decompose this clinical question into 1–3 precise PICO questions.
 Return {"picos":[{"population":"...","intervention":"...","comparator":"...",
@@ -134,12 +136,30 @@ Return {"picos":[{"population":"...","intervention":"...","comparator":"...",
 "secondary_terms":["English outcome synonyms"],"mesh_terms":[],"priority":1,
 "claim_direction":"benefit or harm"}]}.
 Use 4–8 concise primary terms and 2–5 secondary terms found in medical abstracts.
-Each term and outcome must be at most 5 words. Search combines OR within each group,
+Every item in primary_terms, secondary_terms, and outcome MUST be a short phrase of
+1–5 whitespace-separated English words. Use terms such as "myocardial infarction"
+or "preserved ejection fraction"; never write a sentence such as "patients with a
+history of myocardial infarction". Search combines OR within each group,
 AND between groups. Avoid combining different population/therapy axes with OR.
 claim_direction=benefit if the proposition is that treatment helps, harm if exposure increases risk.
 Do not answer the question or claim any evidence has been retrieved.
 Question (data): """ + json.dumps(question, ensure_ascii=False)
-        return PicoDraft.model_validate(self.complete(prompt, "opus"))
+        for attempt in range(self.DRAFT_REPAIR_ATTEMPTS):
+            answer = self.complete(prompt, "opus")
+            try:
+                return PicoDraft.model_validate(answer)
+            except ValidationError as exc:
+                if attempt + 1 >= self.DRAFT_REPAIR_ATTEMPTS:
+                    logger.warning("Opus returned an invalid PICO draft: %s", exc)
+                    raise WorkError("AI 產生的 PICO 搜尋詞格式不符合規則，請重試。") from exc
+                prompt = (
+                    prompt
+                    + "\n\nYour previous JSON failed validation. Return the same clinical decomposition "
+                    "with every primary_terms, secondary_terms, and outcome item reduced to "
+                    "1–5 whitespace-separated English words. Do not include explanatory sentences "
+                    "inside search-term arrays. Return only the corrected JSON object."
+                )
+        raise AssertionError("unreachable")
 
     def expert_checkpoint(self, base: Path) -> ExpertReview:
         """Ask Opus to review the search set before the pipeline continues.

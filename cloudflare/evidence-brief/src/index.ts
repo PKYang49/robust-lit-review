@@ -373,6 +373,7 @@ async function notifyDiscord(env: Env, row: JobRow, brief: Data): Promise<void> 
     content = `${mention}Evidence Brief 已完成\n${row.question}\n\n公開證據摘要：${publicReportUrl(env, row.id)}`;
   } else if (status === "error") {
     content = `${mention}Evidence Brief 需要接續處理\n${row.question}\n\n${String(brief.message || "請回到查詢頁面接續執行。")}`;
+    components = [{ type: 1, components: [{ type: 2, style: 2, label: "重試此查詢", custom_id: `evidence:resume:${row.id}` }] }];
   } else return;
   await discordApi(env, `/channels/${row.discord_channel_id}/messages`, {
     content: content.slice(0, 2000),
@@ -406,15 +407,15 @@ async function discordInteraction(request: Request, env: Env): Promise<Response>
 
   const component = object(data.data, "Discord 按鈕");
   const customId = string(component.custom_id, 100, "Discord 按鈕", 1);
-  const match = customId.match(/^evidence:(approve|checkpoint):([a-f0-9]{32})(?::(\d{4}))?$/);
+  const match = customId.match(/^evidence:(approve|checkpoint|resume):([a-f0-9]{32})(?::(\d{4}))?$/);
   if (!match) return interactionReply("此按鈕已失效，請重新送出查詢。", true);
   const [, kind, jobId, year] = match;
   const row = await getJob(env, jobId);
   if (row.source !== "discord" || row.discord_user_id !== userId || row.discord_channel_id !== channelId) {
     return interactionReply("這不是你的 Evidence Brief 查詢。", true);
   }
-  const expected = kind === "approve" ? "pico_review" : "checkpoint";
-  if (row.status !== expected || row.command !== null || row.lease_token !== null) {
+  const expected = kind === "approve" ? ["pico_review"] : kind === "checkpoint" ? ["checkpoint"] : ["error", "interrupted"];
+  if (!expected.includes(row.status) || row.command !== null || row.lease_token !== null) {
     return interactionReply("這筆查詢已經開始處理或已完成，請稍候查看最新通知。", true);
   }
   const job = snapshot(row, env);
@@ -422,6 +423,11 @@ async function discordInteraction(request: Request, env: Env): Promise<Response>
     const resumed = await enqueue(env, row.id, "checkpoint", { additions: [] });
     if (resumed.status !== 202) return interactionReply("查詢目前無法接續，請稍後再試。", true);
     return interactionReply("已確認以目前的文獻繼續產生摘要。", true);
+  }
+  if (kind === "resume") {
+    const resumed = await enqueue(env, row.id, "resume", {});
+    if (resumed.status !== 202) return interactionReply("查詢目前無法接續，請稍後再試。", true);
+    return interactionReply("已重新排入處理佇列。", true);
   }
   const chosen = minYear(year ?? job.min_year);
   const approved = await enqueue(env, row.id, "approve", { picos: job.picos, min_year: chosen });
