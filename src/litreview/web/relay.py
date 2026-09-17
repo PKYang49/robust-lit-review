@@ -63,6 +63,12 @@ def prepare(store: Store, job: dict[str, Any], command: dict[str, Any]) -> dict[
         changes.update(picos=data["picos"], min_year=data["min_year"], phase="preview",
                        status="searching", preview=[],
                        message="Mac 已接收，正在檢查 PubMed 搜尋詞…")
+    elif kind == "edit_pico":
+        instruction = payload.get("instruction")
+        if not isinstance(instruction, str) or not instruction.strip() or len(instruction) > 2000:
+            raise WorkError("PICO 修改指示格式不正確，請重新輸入。")
+        changes.update(phase="draft", status="drafting", edit_instruction=instruction.strip(),
+                       message="Mac 已接收修改指示，正在重新整理 PICO…")
     elif kind == "checkpoint":
         if not (base / "picos.json").exists():
             raise WorkError("本機缺少這筆查詢的研究資料，請從原處理主機繼續。")

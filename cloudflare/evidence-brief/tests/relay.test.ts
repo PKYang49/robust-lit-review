@@ -287,6 +287,55 @@ test("Discord error notifications include a retry button", async t => {
     `evidence:resume:${claimed.job.id}`);
 });
 
+test("Discord can open a PICO edit form and queue the revision", async t => {
+  const f = fixture(t);
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const der = NodeBuffer.from(publicKey.export({ format: "der", type: "spki" }));
+  const userId = "123456789", channelId = "987654321";
+  f.env.PUBLIC_EDGE = "true";
+  f.env.DISCORD_PUBLIC_KEY = der.subarray(-32).toString("hex");
+  f.env.DISCORD_ALLOWED_USER_IDS = userId;
+  f.env.DISCORD_CHANNEL_ID = channelId;
+
+  const signed = async (body: Data) => {
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const raw = JSON.stringify(body);
+    const signature = NodeBuffer.from(sign(null, NodeBuffer.from(timestamp + raw), privateKey)).toString("hex");
+    return f.send("/discord/interactions", body, {
+      "X-Signature-Ed25519": signature, "X-Signature-Timestamp": timestamp,
+    });
+  };
+  const base = { member: { user: { id: userId } }, channel_id: channelId };
+  const created = await signed({ ...base, type: 2,
+    data: { name: "evidence", options: [{ name: "question", value: "A sufficiently long clinical question?" }] } });
+  const content = (await created.json() as Data).data.content as string;
+  const jobId = content.match(/查詢編號 ([a-f0-9]{32})/)?.[1];
+  assert.ok(jobId);
+  const row = f.db.prepare("SELECT snapshot FROM jobs WHERE id = ?").get(jobId) as { snapshot: string };
+  const snapshot = JSON.parse(row.snapshot);
+  snapshot.status = "pico_review";
+  snapshot.picos = [PICO];
+  f.db.prepare("UPDATE jobs SET status = 'pico_review', snapshot = ?, command = NULL WHERE id = ?")
+    .run(JSON.stringify(snapshot), jobId);
+
+  const modal = await signed({ ...base, type: 3, data: { custom_id: `evidence:edit:${jobId}` } });
+  const modalBody = await modal.json() as Data;
+  assert.equal(modalBody.type, 9);
+  assert.equal(modalBody.data.custom_id, `evidence:edit:${jobId}`);
+
+  const submitted = await signed({ ...base, type: 5, data: {
+    custom_id: `evidence:edit:${jobId}`,
+    components: [{ type: 1, components: [{ type: 4, custom_id: "instruction",
+      value: "把主要結果改成心血管死亡，並保留 LVEF 正常族群" }] }],
+  } });
+  assert.equal(submitted.status, 200);
+  const commandRow = f.db.prepare("SELECT command, status FROM jobs WHERE id = ?").get(jobId) as { command: string; status: string };
+  assert.equal(commandRow.status, "drafting");
+  const command = JSON.parse(commandRow.command);
+  assert.equal(command.kind, "edit_pico");
+  assert.equal(command.payload.instruction, "把主要結果改成心血管死亡，並保留 LVEF 正常族群");
+});
+
 test("worker updates bound reports and reject invalid states or completed jobs without reports", async t => {
   const f = fixture(t);
   await f.create();

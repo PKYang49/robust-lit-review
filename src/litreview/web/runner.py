@@ -128,7 +128,8 @@ class ClaudeRunner:
 
     DRAFT_REPAIR_ATTEMPTS = 2
 
-    def draft(self, question: str) -> PicoDraft:
+    def draft(self, question: str, *, edit_instruction: str | None = None,
+              existing_picos: list[dict[str, Any]] | None = None) -> PicoDraft:
         prompt = """Decompose this clinical question into 1–3 precise PICO questions.
 Return {"picos":[{"population":"...","intervention":"...","comparator":"...",
 "outcome":"short English noun phrase","outcome_domain":"snake_case",
@@ -144,6 +145,14 @@ AND between groups. Avoid combining different population/therapy axes with OR.
 claim_direction=benefit if the proposition is that treatment helps, harm if exposure increases risk.
 Do not answer the question or claim any evidence has been retrieved.
 Question (data): """ + json.dumps(question, ensure_ascii=False)
+        if edit_instruction:
+            prompt += (
+                "\n\nThe user wants to revise the existing PICO draft. Keep the clinical question "
+                "focused and preserve useful content unless the instruction asks to change it. "
+                f"EXISTING PICO (data): {json.dumps(existing_picos or [], ensure_ascii=False)}\n"
+                f"MODIFICATION INSTRUCTION (data): {json.dumps(edit_instruction, ensure_ascii=False)}\n"
+                "Return the complete revised PICO JSON, not a patch."
+            )
         for attempt in range(self.DRAFT_REPAIR_ATTEMPTS):
             answer = self.complete(prompt, "opus")
             try:
@@ -430,9 +439,16 @@ class BriefWorker:
         base = self.store.base(job_id)
         self.cfg = self.job_config(job)
         if job["phase"] == "draft":
-            draft = self.runner.draft(job["question"])
+            edit_instruction = job.get("edit_instruction")
+            draft = self.runner.draft(
+                job["question"],
+                edit_instruction=edit_instruction,
+                existing_picos=job.get("picos") or None,
+            )
             self.store.update(job_id, picos=draft.model_dump()["picos"], status="pico_review",
-                              message="請確認 PICO 與搜尋詞，再開始檢索。", phase="preview")
+                              message=("請確認修改後的 PICO 與搜尋詞，再開始檢索。"
+                                       if edit_instruction else "請確認 PICO 與搜尋詞，再開始檢索。"),
+                              phase="preview")
             return
         if job["phase"] == "preview":
             preview = asyncio.run(brief_flow.run_preview(base, self.cfg))

@@ -15,7 +15,7 @@ export interface Env {
 }
 
 type Data = Record<string, unknown>;
-type CommandKind = "draft" | "approve" | "checkpoint" | "resume" | "auto_checkpoint";
+type CommandKind = "draft" | "approve" | "edit_pico" | "checkpoint" | "resume" | "auto_checkpoint";
 interface JobRow {
   id: string;
   question: string;
@@ -229,6 +229,18 @@ async function payload(request: Request, limit: number): Promise<Data> {
   return object(data);
 }
 
+function modalValue(data: Data, customId: string): string {
+  const rows = list(data.components, 5, "表單欄位", 1);
+  for (const row of rows) {
+    const group = object(row, "表單欄位");
+    for (const item of list(group.components, 5, "表單欄位", 1)) {
+      const field = object(item, "表單欄位");
+      if (field.custom_id === customId) return string(field.value, 2000, "PICO 修改指示", 1);
+    }
+  }
+  throw new HttpError("請輸入 PICO 修改指示。", 422);
+}
+
 function verifyOrigin(request: Request): void {
   const origin = request.headers.get("origin");
   if ((origin && origin !== new URL(request.url).origin) || request.headers.get("sec-fetch-site") === "cross-site") {
@@ -364,7 +376,7 @@ async function notifyDiscord(env: Env, row: JobRow, brief: Data): Promise<void> 
       type: 2, style: index === 0 ? 1 : 2,
       label: index === 0 ? `確認 PICO，搜尋 ${year} 年起` : `改用 ${year} 年起`,
       custom_id: `evidence:approve:${row.id}:${year}`,
-    })) }];
+    })).concat([{ type: 2, style: 2, label: "修改 PICO", custom_id: `evidence:edit:${row.id}` }]) }];
   } else if (status === "checkpoint") {
     content = `${mention}Evidence Brief 需要你確認\n${row.question}\n\n${String(brief.message || "自動核對認為納入的研究無法回答問題。")}`
       + `\n\n仍要以目前的文獻繼續產生摘要，請按下方按鈕；若要改搜尋策略，請回到查詢頁面。`;
@@ -387,7 +399,7 @@ async function discordInteraction(request: Request, env: Env): Promise<Response>
   const data = await discordInteractionData(request, env);
   const type = Number(data.type);
   if (type === 1) return Response.json({ type: 1 });
-  if (type !== 2 && type !== 3) return interactionReply("目前只支援 Evidence Brief 查詢與 PICO 確認。", true);
+  if (type !== 2 && type !== 3 && type !== 5) return interactionReply("目前只支援 Evidence Brief 查詢與 PICO 確認。", true);
 
   const userId = discordUserId(data), channelId = discordChannelId(data);
   if (!discordAllowed(env, userId, channelId)) return interactionReply("此 Discord 使用者或頻道沒有使用權限。", true);
@@ -405,16 +417,36 @@ async function discordInteraction(request: Request, env: Env): Promise<Response>
     return interactionReply(`已收到臨床問題，查詢編號 ${String(job.id)}。PICO 整理完成後會在此頻道通知你。`, true);
   }
 
-  const component = object(data.data, "Discord 按鈕");
-  const customId = string(component.custom_id, 100, "Discord 按鈕", 1);
-  const match = customId.match(/^evidence:(approve|checkpoint|resume):([a-f0-9]{32})(?::(\d{4}))?$/);
+  const component = object(data.data, type === 5 ? "Discord 表單" : "Discord 按鈕");
+  const customId = string(component.custom_id, 100, type === 5 ? "Discord 表單" : "Discord 按鈕", 1);
+  const match = customId.match(/^evidence:(approve|checkpoint|resume|edit):([a-f0-9]{32})(?::(\d{4}))?$/);
   if (!match) return interactionReply("此按鈕已失效，請重新送出查詢。", true);
   const [, kind, jobId, year] = match;
+  if (type === 5 && kind !== "edit") return interactionReply("此表單已失效，請重新整理查詢。", true);
+  if (type === 3 && kind === "edit") {
+    const row = await getJob(env, jobId);
+    if (row.source !== "discord" || row.discord_user_id !== userId || row.discord_channel_id !== channelId) {
+      return interactionReply("這不是你的 Evidence Brief 查詢。", true);
+    }
+    if (row.status !== "pico_review" || row.command !== null || row.lease_token !== null) {
+      return interactionReply("這筆查詢已經開始處理或已完成，請稍候查看最新通知。", true);
+    }
+    return Response.json({ type: 9, data: {
+      custom_id: `evidence:edit:${row.id}`,
+      title: "修改 PICO",
+      components: [{ type: 1, components: [{
+        type: 4, custom_id: "instruction", style: 2, label: "修改指示",
+        placeholder: "例如：只比較持續使用與不使用，並加入再梗塞結果",
+        required: true, max_length: 2000,
+      }] }],
+    } });
+  }
   const row = await getJob(env, jobId);
   if (row.source !== "discord" || row.discord_user_id !== userId || row.discord_channel_id !== channelId) {
     return interactionReply("這不是你的 Evidence Brief 查詢。", true);
   }
-  const expected = kind === "approve" ? ["pico_review"] : kind === "checkpoint" ? ["checkpoint"] : ["error", "interrupted"];
+  const expected = kind === "approve" || kind === "edit" ? ["pico_review"]
+    : kind === "checkpoint" ? ["checkpoint"] : ["error", "interrupted"];
   if (!expected.includes(row.status) || row.command !== null || row.lease_token !== null) {
     return interactionReply("這筆查詢已經開始處理或已完成，請稍候查看最新通知。", true);
   }
@@ -428,6 +460,12 @@ async function discordInteraction(request: Request, env: Env): Promise<Response>
     const resumed = await enqueue(env, row.id, "resume", {});
     if (resumed.status !== 202) return interactionReply("查詢目前無法接續，請稍後再試。", true);
     return interactionReply("已重新排入處理佇列。", true);
+  }
+  if (kind === "edit") {
+    const instruction = modalValue(component, "instruction");
+    const edited = await enqueue(env, row.id, "edit_pico", { instruction });
+    if (edited.status !== 202) return interactionReply("PICO 修改目前無法接續，請稍後再試。", true);
+    return interactionReply("已收到 PICO 修改指示，Opus 重新整理後會再通知你。", true);
   }
   const chosen = minYear(year ?? job.min_year);
   const approved = await enqueue(env, row.id, "approve", { picos: job.picos, min_year: chosen });
@@ -453,21 +491,29 @@ async function createBrief(env: Env, data: Data, discord?: DiscordContext): Prom
 
 async function enqueue(env: Env, jobId: string, kind: Exclude<CommandKind, "draft">, data: Data): Promise<Response> {
   const row = await getJob(env, jobId), job = snapshot(row, env);
-  const allowed = kind === "approve" ? ["pico_review"] : kind === "checkpoint" ? ["checkpoint"] : ["error", "interrupted"];
+  const allowed = kind === "approve" || kind === "edit_pico" ? ["pico_review"]
+    : kind === "checkpoint" ? ["checkpoint"] : ["error", "interrupted"];
   if (!allowed.includes(row.status) || row.command !== null || row.lease_token !== null) {
     throw new HttpError("查詢狀態已變更或正在處理，請重新整理。", 409);
   }
   const commandPayload = kind === "approve"
     ? { picos: validatePicos(data.picos), min_year: minYear(data.min_year ?? job.min_year) }
+    : kind === "edit_pico" ? { instruction: string(data.instruction, 2000, "PICO 修改指示", 1) }
     : kind === "checkpoint" ? checkpoint(data, job) : {};
-  const status = kind === "approve" ? "searching" : kind === "resume" && !(job.picos as unknown[]).length ? "drafting" : "running";
+  const status = kind === "approve" ? "searching"
+    : kind === "edit_pico" ? "drafting"
+    : kind === "resume" && !(job.picos as unknown[]).length ? "drafting" : "running";
   const at = timestamp();
-  const updated = { ...job, status, updated_at: at, message: "已排入佇列，等待工作電腦接續處理…", report_url: null };
+  const updated = { ...job, status, updated_at: at,
+    message: kind === "edit_pico" ? "已排入佇列，等待 Opus 重新整理 PICO…" : "已排入佇列，等待工作電腦接續處理…",
+    report_url: null };
   if (kind === "approve") Object.assign(updated, { ...commandPayload, preview: [] });
-  const result = await env.DB.prepare(`UPDATE jobs SET snapshot = ?, command = ?, status = ?, updated_at = ?
+  const result = await env.DB.prepare(`UPDATE jobs SET snapshot = ?, command = ?, status = ?, updated_at = ?,
+    discord_last_status = CASE WHEN ? = 1 THEN NULL ELSE discord_last_status END
     WHERE id = ? AND status = ? AND command IS NULL AND lease_token IS NULL
     AND (SELECT COUNT(*) FROM jobs WHERE command IS NOT NULL) < ? RETURNING *`)
-    .bind(JSON.stringify(updated), JSON.stringify({ id: uuid(), kind, payload: commandPayload }), status, at, row.id, row.status, MAX_PENDING)
+    .bind(JSON.stringify(updated), JSON.stringify({ id: uuid(), kind, payload: commandPayload }), status, at,
+      kind === "edit_pico" ? 1 : 0, row.id, row.status, MAX_PENDING)
     .first<JobRow>();
   if (!result) throw new HttpError("查詢已在處理中或佇列已滿，請稍後重新整理。", 409);
   return Response.json(snapshot(result, env), { status: 202 });

@@ -40,10 +40,12 @@ report host and do not require Access.
 
 The existing `MacJournal` Discord bot accepts the `/evidence` slash command in
 the configured channel. Send `/evidence` with a clinical question; after Opus
-prepares the PICO, the bot posts a confirmation button. Pressing it starts the
-search and the bot posts the public report link when the evidence brief is
-complete. Discord interactions are signature-verified and restricted to the
-configured user and channel.
+prepares the PICO, the bot posts confirmation and **修改 PICO** buttons. The
+edit button opens a short instruction form; Opus returns a revised PICO for
+confirmation. Pressing a confirmation button starts the search and the bot
+posts the public report link when the evidence brief is complete. Discord
+interactions are signature-verified and restricted to the configured user and
+channel.
 
 The public report Worker is deployed with `wrangler.public.toml`; it exposes
 only `/briefs/<id>/report` and `/discord/interactions`, while the workspace and
