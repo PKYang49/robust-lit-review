@@ -310,3 +310,35 @@ def test_build_pico_queries_keeps_prose_outcome_out_of_the_query():
 
     only_prose = PICOQuestion(intervention="vaping", outcome=prose, primary_terms=["vaping"])
     assert prose in pipe.build_pico_queries(only_prose)[0].boolean_query  # nothing else describes the outcome
+
+
+async def test_expert_addition_named_twice_is_added_once(monkeypatch):
+    """One paper named by both PMID and DOI must not enter the set twice."""
+    monkeypatch.setattr(co, "batch_verify_crossref", _stub_crossref_all_verified)
+    config = Config(unpaywall_email="")
+    pipe = ClaimAppraisalPipeline(config)
+    inner = LitReviewPipeline(config)
+    record = {"pmid": "27748956", "doi": "10.1113/JP273196", "title": "Physiological adaptations",
+              "journal": "J Physiol", "year": 2016, "pub_type": "Review", "pub_types": [],
+              "abstract": "x", "authors": [], "issn": None, "volume": None, "issue": None, "pages": None}
+
+    class _Dup(_FakePubMed):
+        async def fetch_articles(self, pmids):
+            # EFetch echoes a repeated id as a repeated record.
+            return [dict(record) for _ in pmids if _ == "27748956"]
+
+    inner._pubmed = _Dup([record])
+    pipe._pipeline = inner
+
+    async def fake_quality(articles, **kw):
+        for a in articles:
+            a.journal_quartile = "Q1"
+        return articles
+
+    monkeypatch.setattr(co, "assess_journal_quality", fake_quality)
+
+    added, rejected = await pipe.add_expert_studies(
+        "pico_01", ["27748956", "10.1113/JP273196"], included=[])
+    assert len(added) == 1
+    assert added[0].pmid == "27748956"
+    assert rejected == {}

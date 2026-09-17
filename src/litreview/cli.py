@@ -183,7 +183,7 @@ def brief_search(
     slug: str = typer.Argument(..., help="Brief slug; reads output/<slug>/picos.json"),
     pico: str = typer.Option(None, "--pico", help="Run only this pico_id (default: all)"),
     max_results: int = typer.Option(30, "--max-results", "-n", help="Results per search pass per PICO (there are up to 4 passes)"),
-    min_year: int = typer.Option(2016, "--min-year", help="Earliest publication year"),
+    min_year: int = typer.Option(2000, "--min-year", help="Earliest publication year"),
     output_dir: Path = typer.Option(Path("output"), "--output", "-o"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -368,7 +368,7 @@ def brief_verify_tasks(
 @brief_command
 def brief_write_tasks(
     slug: str = typer.Argument(...),
-    min_year: int = typer.Option(2016, "--min-year"),
+    min_year: int = typer.Option(2000, "--min-year"),
     output_dir: Path = typer.Option(Path("output"), "--output", "-o"),
 ):
     """Collect GRADE, derive each verdict, write tasks/write_<pico>.md for the writer agents."""
@@ -541,7 +541,7 @@ def brief_gaps(
 def brief_next(
     slug: str = typer.Argument(...),
     max_results: int = typer.Option(30, "--max-results", "-n", help="Results per search pass per PICO"),
-    min_year: int = typer.Option(2016, "--min-year", help="Earliest publication year"),
+    min_year: int = typer.Option(2000, "--min-year", help="Earliest publication year"),
     output_dir: Path = typer.Option(Path("output"), "--output", "-o"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):

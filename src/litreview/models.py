@@ -54,10 +54,16 @@ class ArticleMetadata(BaseModel):
     crossref_verified: bool = False  # confirmed to exist in CrossRef (anti-hallucination gate)
     crossref_title_match: float = 0.0  # 0..1 similarity of CrossRef title to our title
 
+    # Persisted only by the evidence-brief store when two records would
+    # otherwise produce the same author/year/title citation key.
+    citation_key_override: str | None = Field(default=None, exclude=True)
+
     @property
     def citation_key(self) -> str:
         """Generate a BibTeX citation key."""
         import re
+        if self.citation_key_override:
+            return self.citation_key_override
         if self.authors:
             # Handle both "Last, First" and "Last First" and "Last F.M." formats
             raw = self.authors[0].split(",")[0].strip()

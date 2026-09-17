@@ -244,7 +244,8 @@ def create_app(settings: Settings | None = None, cfg: Config | None = None,
         require_capacity()
         data = {"question": job["question"], **payload.model_dump()}
         write_json(store.base(job_id) / "picos.json", data)
-        updated = store.update(job_id, picos=data["picos"], preview=[], status="searching", phase="preview",
+        updated = store.update(job_id, picos=data["picos"], min_year=data["min_year"], preview=[],
+                               status="searching", phase="preview",
                                message="正在檢查 PubMed 搜尋詞…")
         enqueue(job_id)
         return updated

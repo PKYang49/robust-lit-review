@@ -60,7 +60,8 @@ def prepare(store: Store, job: dict[str, Any], command: dict[str, Any]) -> dict[
         draft = PicoDraft.model_validate(payload)
         data = {"question": job["question"], **draft.model_dump()}
         write_json(base / "picos.json", data)
-        changes.update(picos=data["picos"], phase="preview", status="searching", preview=[],
+        changes.update(picos=data["picos"], min_year=data["min_year"], phase="preview",
+                       status="searching", preview=[],
                        message="Mac 已接收，正在檢查 PubMed 搜尋詞…")
     elif kind == "checkpoint":
         if not (base / "picos.json").exists():
@@ -81,7 +82,7 @@ def prepare(store: Store, job: dict[str, Any], command: dict[str, Any]) -> dict[
 
 def snapshot(store: Store, job_id: str) -> dict[str, Any]:
     allowed = {"id", "question", "status", "message", "updated_at", "picos", "preview", "studies", "gaps",
-               "states", "events", "report_url", "fulltext", "additions_result"}
+               "states", "events", "report_url", "fulltext", "additions_result", "min_year"}
     return {k: v for k, v in store.get(job_id).items() if k in allowed}
 
 

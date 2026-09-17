@@ -4,7 +4,7 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
-import worker, { createHandler, HttpError, type Env, validatePicos } from "../src/index.ts";
+import worker, { createHandler, HttpError, type Env, minYear, validatePicos } from "../src/index.ts";
 
 type Data = Record<string, any>;
 const SYNC_TOKEN = "test-sync-token-which-is-at-least-32-characters";
@@ -284,4 +284,14 @@ test("heartbeat exposes capabilities and offline status without blocking new job
   assert.equal(config.worker_online, false);
   const logout = await (await f.send("/api/logout", {})).json() as Data;
   assert.equal(logout.logout_url, "/cdn-cgi/access/logout");
+});
+
+test("the year window is per question, bounded, and defaults to 2000", () => {
+  assert.equal(minYear(undefined), 2000);
+  assert.equal(minYear(""), 2000);
+  assert.equal(minYear(2016), 2016);
+  assert.equal(minYear("1995"), 1995);
+  for (const bad of [1959, 1800, new Date().getUTCFullYear() + 1, 2016.5, "soon"]) {
+    assert.throws(() => minYear(bad), HttpError, `expected ${String(bad)} to be rejected`);
+  }
 });

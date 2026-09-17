@@ -41,6 +41,11 @@ class Config(BaseModel):
     min_citescore: float = Field(default=3.0, description="Minimum CiteScore fallback for journal filtering")
     min_sjr: float = Field(default=0.5, description="Minimum SJR quartile threshold")
     min_year: int = Field(default=2016, description="Earliest publication year to include")
+    strict_quartile: bool = Field(
+        default=True,
+        description="Drop journals whose quartile cannot be confirmed. Right for claim appraisal, "
+                    "wrong for a general question: many specialty journals are simply unranked.",
+    )
     max_results_per_db: int = Field(default=100, description="Max results per database search")
     target_articles: int = Field(default=50, description="Target number of articles for review")
     databases: list[str] = Field(

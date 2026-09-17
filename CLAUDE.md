@@ -48,6 +48,8 @@ lit-review brief checkpoint <slug> --note "..."   # record the expert review; un
 
 # The individual stages `next` drives, for redoing one on its own:
 lit-review brief search <slug>        # reads output/<slug>/picos.json; 3 passes + CrossRef snowballing
+#   --min-year defaults to 2000: a settled question's landmark trials often predate 2016.
+#   Unranked journals are screened rather than dropped (claim appraisal keeps the strict Q1 gate).
 lit-review brief studies <slug>       # table of included RCT/MA/SR for the expert checkpoint
 lit-review brief gaps <slug>          # top gate exclusions by citation count (checkpoint near-misses)
 lit-review brief add <slug> <pico> --id <PMID|DOI>   # expert additions, same gates

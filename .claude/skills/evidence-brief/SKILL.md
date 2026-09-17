@@ -24,6 +24,15 @@ cd <repo> && source .venv/bin/activate   # or .venv/bin/lit-review directly
 `.env` needs `PUBMED_EMAIL` (and ideally `UNPAYWALL_EMAIL`; same address is fine).
 `SCOPUS_API_KEY` is optional: with it, a most-cited pass is added per PICO.
 
+## Year window
+`--min-year` defaults to **2000**, not 2016. The 2016 cutoff belongs to
+`/claim-appraise` (is this current claim true?); a settled question — exercise
+physiology, diagnostics, surgical technique — has its landmark trials and
+meta-analyses well before it, and a 2016 gate silently removes exactly the
+studies that answer it. Raise it only when the question is about something
+recent. Unranked journals are admitted and screened rather than dropped, and
+the page reports how many there were.
+
 ## Step 1 — Decompose (you, inline; no subagent)
 
 Read the question. Write 1–3 PICO sub-questions to `output/<slug>/picos.json`

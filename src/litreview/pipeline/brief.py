@@ -69,7 +69,7 @@ _CERTAINTY_PIPS = {"very_low": 1, "low": 2, "moderate": 3, "high": 4}
 # ---------------------------------------------------------------------------
 
 
-def brief_config(max_results: int = 50, min_year: int = 2016) -> Config:
+def brief_config(max_results: int = 50, min_year: int = 2000) -> Config:
     """PubMed-only configuration with the appraisal's hard gates."""
     cfg = get_config()
     # Scopus contributes one most-cited pass (only if a key is configured);
@@ -77,6 +77,11 @@ def brief_config(max_results: int = 50, min_year: int = 2016) -> Config:
     cfg.databases = ["pubmed", "scopus"]
     cfg.max_results_per_db = max_results
     cfg.min_year = min_year
+    # A question is not a claim appraisal: an unranked journal is usually a
+    # specialty title missing from the ranking table, not a bad one. Abstract
+    # screening is the real filter, so unranked journals are admitted and
+    # reported separately rather than dropped unseen.
+    cfg.strict_quartile = False
     cfg.min_quartile = "Q1"
     return cfg
 
@@ -107,7 +112,31 @@ def _study_dump(a: ArticleMetadata) -> dict:
 
 
 def _study_load(d: dict) -> ArticleMetadata:
-    return ArticleMetadata(**{k: v for k, v in d.items() if k in ArticleMetadata.model_fields})
+    values = {k: v for k, v in d.items() if k in ArticleMetadata.model_fields}
+    # ``citation_key`` is a derived field in ArticleMetadata, but evidence
+    # batches need a stable key even when two papers share author/year/title.
+    if isinstance(d.get("citation_key"), str) and d["citation_key"].strip():
+        values["citation_key_override"] = d["citation_key"].strip()
+    return ArticleMetadata(**values)
+
+
+def _ensure_unique_citation_keys(studies: list[ArticleMetadata]) -> None:
+    """Disambiguate derived keys deterministically within one PICO."""
+    used: set[str] = set()
+    for index, article in enumerate(studies, 1):
+        key = article.citation_key
+        if key not in used:
+            used.add(key)
+            continue
+        identity = article.pmid or _norm_doi(article.doi or "")
+        suffix = re.sub(r"[^A-Za-z0-9]", "", str(identity))[-10:] or str(index)
+        candidate = f"{key}{suffix}"
+        serial = 2
+        while candidate in used:
+            candidate = f"{key}{suffix}{serial}"
+            serial += 1
+        article.citation_key_override = candidate
+        used.add(candidate)
 
 
 def load_pico_result(base: Path, pico_id: str) -> tuple[PICOQuestion, PicoPrismaFlow, list[ArticleMetadata]]:
@@ -115,11 +144,9 @@ def load_pico_result(base: Path, pico_id: str) -> tuple[PICOQuestion, PicoPrisma
     if not path.exists():
         raise FileNotFoundError(f"{path} not found — run `lit-review brief search` first")
     data = json.loads(path.read_text(encoding="utf-8"))
-    return (
-        PICOQuestion(**data["pico"]),
-        PicoPrismaFlow(**data["prisma"]),
-        [_study_load(s) for s in data["included_studies"]],
-    )
+    studies = [_study_load(s) for s in data["included_studies"]]
+    _ensure_unique_citation_keys(studies)
+    return (PICOQuestion(**data["pico"]), PicoPrismaFlow(**data["prisma"]), studies)
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +694,7 @@ def _fulltext_note(base: Path, pico_id: str, grade: GradeAssessment) -> str:
             f"其餘研究只有摘要。{extra}\n")
 
 
-def write_writer_task(base: Path, pico_id: str, min_year: int = 2016) -> Path:
+def write_writer_task(base: Path, pico_id: str, min_year: int = 2000) -> Path:
     """Write the writer prompt to ``tasks/write_NN.md`` once the verdict is known."""
     pico, _flow, _studies = load_pico_result(base, pico_id)
     grade, verdict = collect_verdict(base, pico_id)
@@ -866,6 +893,7 @@ def render_brief(base: Path, output_path: Path | None = None) -> Path:
                 for d in grade.domains
             ],
             "starting_level": grade.starting_level,
+            "n_unranked": sum(1 for a in studies if (a.journal_quartile or "Unknown") == "Unknown"),
             "body_of_evidence": [k.lstrip("@") for k in grade.body_of_evidence],
             "fulltext_ok": len(ft_ok),
             "fulltext_total": ft_total,
@@ -883,8 +911,10 @@ def render_brief(base: Path, output_path: Path | None = None) -> Path:
     cfg = brief_config()
     env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)),
                       autoescape=select_autoescape(["html", "j2"]))
+    unranked_total = sum(card["n_unranked"] for card in pico_cards)
     html = env.get_template("brief.html.j2").render(
         question=question,
+        unranked_total=unranked_total,
         generated=datetime.now(UTC).date().isoformat(),
         overall_verdict=overall_verdict,
         overall_verdict_zh=VERDICT_ZH.get(overall_verdict, overall_verdict),

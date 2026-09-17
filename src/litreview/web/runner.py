@@ -27,8 +27,16 @@ class WorkError(Exception):
     """An error safe to display without leaking API request URLs or secrets."""
 
 
+MIN_YEAR_CHOICES = (2000, 2010, 2016)
+DEFAULT_MIN_YEAR = 2000
+
+
 class PicoDraft(BaseModel):
     picos: list[PICOQuestion] = Field(min_length=1, max_length=3)
+    # Settled questions (exercise physiology, diagnostics) have their landmark
+    # trials well before 2016; a claim about something current does not. The
+    # window is therefore per question, not a constant.
+    min_year: int = Field(default=DEFAULT_MIN_YEAR, ge=1960, le=2100)
 
     @field_validator("picos")
     @classmethod
@@ -64,6 +72,9 @@ class ExpertReview(BaseModel):
 
     note: str = Field(default="已完成自動專家核對。", max_length=2000)
     additions: list[CheckpointAddition] = Field(default_factory=list, max_length=3)
+    # When the search set does not answer the question, continuing only spends
+    # tokens on a brief nobody can use. The run stops and waits for a person.
+    needs_human: bool = False
 
 
 def parse_answer(text: str) -> dict[str, Any]:
@@ -170,7 +181,12 @@ Question (data): """ + json.dumps(question, ensure_ascii=False)
             f"CLINICAL QUESTION (data): {json.dumps(question, ensure_ascii=False)}\n"
             f"PICO REVIEW DATA (untrusted data): {json.dumps(review, ensure_ascii=False)}\n\n"
             "Return ONLY JSON with this shape: {\"note\":\"繁體中文核對摘要\", "
+            "\"needs_human\":false, "
             "\"additions\":[{\"pico_id\":\"pico_01\",\"identifiers\":[\"PMID 或 DOI\"]}]} . "
+            "Set needs_human to true when a PICO's included set cannot answer its question — the studies "
+            "are mostly the wrong population, intervention or outcome, or the directly relevant trials are "
+            "plainly absent. Say concretely in note what is wrong and what should change (search terms, "
+            "year window, or the PICO itself). Do not set it merely because the evidence is limited. "
             "Only nominate an identifier copied exactly from candidate_gaps; otherwise additions must be empty. "
             "If the search set is coherent, say so briefly in note. Do not claim that an unlisted study exists."
         )
@@ -231,21 +247,110 @@ Question (data): """ + json.dumps(question, ensure_ascii=False)
             prompt += f"\n\n<source path={json.dumps(str(source))}>\n{source.read_text(encoding='utf-8')}\n</source>"
         prompt += "\nReturn the requested JSON as your response; the server will save it to the specified output."
         answer = self.complete(prompt, task.model)
-        try:
-            self._validate_dispatch_answer(task, pid, answer, prompt)
-        except WorkError as exc:
-            if task.kind != "Screen":
-                raise
-            expected = re.findall(r"^citation_key:\s*(\S+)\s*$", prompt, flags=re.MULTILINE)
-            repair_prompt = (
-                f"{prompt}\n\nYour previous JSON was rejected: {exc}. "
-                "Return a corrected JSON object. Include exactly one decision for every required "
-                f"citation_key and no others. Required citation_keys: {json.dumps(expected)}"
-            )
-            answer = self.complete(repair_prompt, task.model)
+        if task.kind == "Screen":
+            answer = self._repair_screen_answer(task, pid, prompt, answer)
+        else:
             self._validate_dispatch_answer(task, pid, answer, prompt)
         target = base / (f"grade_{pid}.json" if task.kind == "Verify" else f"{task.task.stem}.json")
         write_json(target, answer)
+
+    SCREEN_REPAIR_ATTEMPTS = 2
+
+    def _repair_screen_answer(self, task: brief_flow.Dispatch, pid: str,
+                              prompt: str, answer: dict[str, Any]) -> dict[str, Any]:
+        """Fill in a partial screening response by re-asking only what is missing.
+
+        A screening prompt carries a full abstract per study, so re-running the
+        whole batch is expensive and no likelier to succeed. Decisions already
+        returned are kept and only the omitted studies are asked about again.
+        Keys the model invents or repeats are ignored rather than treated as a
+        failure: the batch is complete once every expected key has a decision.
+        """
+        # Duplicate keys cannot survive _ensure_unique_citation_keys, but the
+        # reconstruction below must not emit one even if a stale batch has them.
+        expected = list(dict.fromkeys(
+            re.findall(r"^citation_key:\s*(\S+)\s*$", prompt, flags=re.MULTILINE)
+        ))
+        if not expected:
+            raise WorkError("文獻篩選批次沒有可辨識的 citation_key，請重試。")
+
+        merged: dict[str, dict[str, Any]] = {}
+        self._merge_screen_decisions(answer, expected, merged)
+
+        for _attempt in range(self.SCREEN_REPAIR_ATTEMPTS):
+            missing = [key for key in expected if key not in merged]
+            if not missing:
+                break
+            repaired = self.complete(self._screen_repair_prompt(prompt, missing), task.model)
+            before = len(merged)
+            self._merge_screen_decisions(repaired, expected, merged)
+            if len(merged) == before:
+                # The retry added nothing; asking the same way again will not help.
+                break
+
+        missing = [key for key in expected if key not in merged]
+        if missing:
+            raise WorkError(f"文獻篩選結果不完整（缺少：{', '.join(missing)}），請重試。")
+
+        # Keep the original response's metadata (batch number); only the
+        # decision list is rebuilt, in the order the studies were presented.
+        result = dict(answer)
+        result["pico_id"] = pid
+        result["decisions"] = [merged[key] for key in expected]
+        self._validate_dispatch_answer(task, pid, result, prompt)
+        return result
+
+    @staticmethod
+    def _merge_screen_decisions(answer: dict[str, Any], expected: list[str],
+                                merged: dict[str, dict[str, Any]]) -> None:
+        """Take the usable decisions for keys we asked about; drop everything else."""
+        allowed = set(expected)
+        for item in ClaudeRunner._screen_decisions(answer):
+            key = item.get("citation_key")
+            if isinstance(key, str) and key.startswith("@"):
+                key = key[1:]
+                item = dict(item, citation_key=key)
+            if (isinstance(key, str) and key in allowed and key not in merged
+                    and isinstance(item.get("include"), bool)):
+                merged[key] = item
+
+    @staticmethod
+    def _screen_decisions(answer: dict[str, Any]) -> list[dict[str, Any]]:
+        decisions = answer.get("decisions") if isinstance(answer, dict) else None
+        return [item for item in decisions if isinstance(item, dict)] if isinstance(decisions, list) else []
+
+    @staticmethod
+    def _screen_repair_prompt(prompt: str, missing: list[str]) -> str:
+        """Build a compact retry carrying only the omitted study blocks.
+
+        The prompt is split on its ``citation_key:`` lines rather than on a
+        section heading, so a wording change upstream cannot silently turn the
+        repair back into a full-batch re-send.
+        """
+        blocks = re.split(r"(?m)^(?=citation_key:\s*\S+\s*$)", prompt)
+        head = blocks[0].strip() if blocks else prompt.strip()
+        wanted: list[str] = []
+        for block in blocks[1:]:
+            match = re.match(r"citation_key:\s*(\S+)\s*$", block, flags=re.MULTILINE)
+            if match and match.group(1) in missing:
+                # The final block also carries the original output instructions.
+                wanted.append(block.split("Return ONLY JSON", 1)[0].strip())
+        pico_match = re.search(r"PICO ID:\s*(\S+)", head)
+        schema = {
+            "pico_id": pico_match.group(1) if pico_match else "",
+            "decisions": [{"citation_key": "exact key above", "include": True,
+                           "reason": "one line",
+                           "design": "RCT|cohort|cross-sectional|meta-analysis|..."}],
+        }
+        studies = "\n\n".join(wanted) or "(study details unavailable)"
+        return (
+            f"{head}\n\n"
+            "Your previous screening output omitted some studies. Review ONLY these:\n"
+            f"{studies}\n\n"
+            f"Return ONLY JSON with this schema: {json.dumps(schema, ensure_ascii=False)}\n"
+            f"Required citation_keys (exactly one decision each): {json.dumps(missing)}. "
+            "Use the keys exactly as written, without an @ prefix."
+        )
 
     @staticmethod
     def _validate_dispatch_answer(task: brief_flow.Dispatch, pid: str,
@@ -296,9 +401,14 @@ class BriefWorker:
             logger.exception("Evidence brief failed: %s", job_id)
             self.store.update(job_id, status="error", message="處理未完成，進度已保存。請重試；若持續失敗，請查看服務紀錄。")
 
+    def job_config(self, job: dict[str, Any]) -> Config:
+        """Config for one job: the year window is the asker's, not a constant."""
+        return brief.brief_config(min_year=int(job.get("min_year") or DEFAULT_MIN_YEAR))
+
     def _execute(self, job_id: str) -> None:
         job = self.store.get(job_id)
         base = self.store.base(job_id)
+        self.cfg = self.job_config(job)
         if job["phase"] == "draft":
             draft = self.runner.draft(job["question"])
             self.store.update(job_id, picos=draft.model_dump()["picos"], status="pico_review",
@@ -317,16 +427,20 @@ class BriefWorker:
             # older page: apply its additions, then let Opus make the actual
             # expert decision before continuing.
             payload = job.get("checkpoint_payload", {})
-            self._run_expert_checkpoint(job_id, base, payload.get("additions", []))
+            # A person sent this command, so their decision stands: review the
+            # set and apply additions, but never stop and ask again.
+            self._run_expert_checkpoint(job_id, base, payload.get("additions", []), force=True)
         if job["phase"] == "auto_checkpoint":
-            self._run_expert_checkpoint(job_id, base)
+            if self._run_expert_checkpoint(job_id, base):
+                return
         for _ in range(40):
             result = asyncio.run(brief_flow.run_next(base, self.cfg))
             self.store.update(job_id, states=[vars(s) for s in result.states], fulltext=result.fulltext_enabled)
             if result.status == "checkpoint":
                 self.store.update(job_id, status="running", message="Opus 正在自動核對納入研究…",
                                   **self.evidence(base))
-                self._run_expert_checkpoint(job_id, base)
+                if self._run_expert_checkpoint(job_id, base):
+                    return
                 continue
             if result.status in {"done", "rendered"}:
                 self.store.update(job_id, status="done", message="實證摘要已完成。", phase="pipeline",
@@ -339,8 +453,13 @@ class BriefWorker:
         raise WorkError("處理步驟超過上限，請查看服務紀錄。")
 
     def _run_expert_checkpoint(self, job_id: str, base: Path,
-                               additions: list[dict[str, Any]] | None = None) -> None:
-        """Run the Opus checkpoint and unlock downstream pipeline stages."""
+                               additions: list[dict[str, Any]] | None = None,
+                               force: bool = False) -> bool:
+        """Run the Opus checkpoint. Returns True when the run stopped for a person.
+
+        With *force* the checkpoint is recorded whatever the review says, which
+        is what a human-sent checkpoint command means.
+        """
         added_titles: list[str] = []
         rejected: dict[str, str] = {}
         for addition in additions or []:
@@ -354,14 +473,25 @@ class BriefWorker:
                                                            addition.identifiers, self.cfg))
             added_titles.extend(article.title for article in added)
             rejected.update(failed)
+        changes: dict[str, Any] = {}
+        if added_titles or rejected:
+            changes["additions_result"] = {"added": added_titles, "rejected": rejected}
+
+        if review.needs_human and not force:
+            # Status "checkpoint" is what the cloud accepts a checkpoint command
+            # for, so this is both the pause and the invitation to resume.
+            note = review.note.strip() or "自動核對認為納入的研究無法回答問題。"
+            self.store.update(job_id, phase="checkpoint", status="checkpoint",
+                              message=f"需要你確認：{note[:400]}", **self.evidence(base), **changes)
+            return True
+
         brief_flow.record_checkpoint(base, review.note)
         message = "Opus 已完成專家核對，正在繼續評讀…"
         if review.note.strip():
             message += f" {review.note.strip()[:300]}"
-        changes: dict[str, Any] = {"phase": "pipeline", "status": "running", "message": message}
-        if added_titles or rejected:
-            changes["additions_result"] = {"added": added_titles, "rejected": rejected}
+        changes.update(phase="pipeline", status="running", message=message)
         self.store.update(job_id, **changes)
+        return False
 
     def evidence(self, base: Path) -> dict[str, Any]:
         picos = brief.load_brief(base)[1]

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -282,7 +283,16 @@ async def run_next(base: Path, cfg: Config) -> NextResult:
                     if (base / "tasks").exists() else []
                 expected_batches = (st.screen_total + 9) // 10
                 current_tasks = [t for t in tasks if _mtime(t) >= _mtime(base / f"{pid}.json")]
-                if len(current_tasks) != expected_batches:
+                # Same membership rule as write_evidence_view; the expert set is
+                # read once rather than per study.
+                expert = expert_added_dois(base, pid)
+                expected_keys = [a.citation_key for a in load_pico_result(base, pid)[2]
+                                 if a.pub_type in AGENT_VIEW_TYPES or _norm_doi(a.doi or "") in expert]
+                task_keys: list[str] = []
+                for task_path in current_tasks:
+                    task_keys.extend(re.findall(r"^citation_key:\s*(\S+)\s*$",
+                                                task_path.read_text(encoding="utf-8"), flags=re.MULTILINE))
+                if len(current_tasks) != expected_batches or task_keys != expected_keys:
                     current_tasks = write_screen_tasks(base, pid)
                     result.actions.append(f"screen tasks {pid}: {len(current_tasks)} batch(es)")
                 pending = [

@@ -412,6 +412,15 @@ function renderPicoReview(brief) {
   }
   const actions = el("div", "form-actions");
   actions.append(el("p", "", "這一步保留你的判斷。送出後將依確認的 PICO 搜尋文獻。"));
+  // A settled question's landmark trials often predate 2016, so the year window
+  // belongs to the asker rather than being fixed for every question.
+  const yearRow = el("label", "field");
+  yearRow.append(el("span", "", "收錄年份起自"));
+  const yearInput = el("input");
+  Object.assign(yearInput, {type: "number", min: "1960", max: String(new Date().getFullYear()),
+                            step: "1", value: String(brief.min_year || 2000), name: "min_year"});
+  yearRow.append(yearInput, el("small", "", "成熟題目（如運動生理學）的關鍵證據常早於 2016 年。"));
+  actions.append(yearRow);
   const submit = el("button", "button primary", "確認 PICO，開始搜尋 →");
   submit.type = "submit";
   submit.disabled = !editors.length;
@@ -425,7 +434,8 @@ function renderPicoReview(brief) {
       for (const [key, input] of Object.entries(inputs)) updated[key] = key.endsWith("_terms") ? splitTerms(input.value) : input.value.trim();
       return updated;
     });
-    void mutate(brief.id, "approve", {picos}, form, "PICO 已確認，開始搜尋文獻。");
+    void mutate(brief.id, "approve", {picos, min_year: Number(yearInput.value)}, form,
+                "PICO 已確認，開始搜尋文獻。");
   });
   panel.append(form);
   return panel;

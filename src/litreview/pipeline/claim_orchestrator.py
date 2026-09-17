@@ -234,7 +234,7 @@ class ClaimAppraisalPipeline:
             kept_year,
             email=self.config.unpaywall_email,
             min_quartile=self.config.min_quartile,
-            strict=True,
+            strict=self.config.strict_quartile,
         )
         counts.after_quality = len(q1)
         counts.excluded_by_quality = len(kept_year) - len(q1)
@@ -367,8 +367,19 @@ class ClaimAppraisalPipeline:
         dois = [i for i in identifiers if not i.strip().isdigit()]
         if dois:
             pmids += await p._pubmed.search_by_dois(dois)
+        # Naming one paper by both its PMID and its DOI resolves to the same
+        # PMID twice, and EFetch echoes a repeated id as a repeated record.
+        pmids = list(dict.fromkeys(pmids))
         raw = await p._pubmed.fetch_articles(pmids) if pmids else []
-        found = [ArticleMetadata(source_db=DatabaseSource.PUBMED, **r) for r in raw]
+        found: list[ArticleMetadata] = []
+        seen_identity: set[str] = set()
+        for record in raw:
+            article = ArticleMetadata(source_db=DatabaseSource.PUBMED, **record)
+            identity = article.pmid or (article.doi or "").lower().strip() or article.title
+            if identity in seen_identity:
+                continue
+            seen_identity.add(identity)
+            found.append(article)
 
         rejected: dict[str, str] = {}
         resolved = {a.pmid for a in found} | {(a.doi or "").lower() for a in found}

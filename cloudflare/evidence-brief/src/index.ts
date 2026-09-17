@@ -44,7 +44,11 @@ const ID_RE = /^[a-f0-9]{32}$/;
 const DISCORD_ID_RE = /^\d{5,25}$/;
 const STATUSES = new Set(["drafting", "searching", "running", "pico_review", "checkpoint", "done", "error", "interrupted"]);
 const WAITING = new Set(["pico_review", "checkpoint", "done", "error", "interrupted"]);
-const DISCORD_NOTIFY_STATUSES = new Set(["pico_review", "done", "error"]);
+const DISCORD_NOTIFY_STATUSES = new Set(["pico_review", "checkpoint", "done", "error"]);
+// Year windows offered on the PICO confirmation message. A settled question
+// (exercise physiology, diagnostics) has its landmark trials well before 2016.
+const MIN_YEAR_CHOICES = [2000, 2010, 2016];
+const DEFAULT_MIN_YEAR = 2000;
 const encoder = new TextEncoder();
 const accessKeys = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -238,6 +242,15 @@ function term(value: unknown): string {
   return valueString;
 }
 
+export function minYear(value: unknown): number {
+  if (value === undefined || value === null || value === "") return DEFAULT_MIN_YEAR;
+  const year = Number(value);
+  if (!Number.isInteger(year) || year < 1960 || year > new Date().getUTCFullYear()) {
+    throw new HttpError("起始年份需為 1960 至今年之間的整數。");
+  }
+  return year;
+}
+
 export function validatePicos(value: unknown): Data[] {
   return list(value, 3, "PICO", 1).map((item, index) => {
     const pico = object(item, "PICO");
@@ -340,8 +353,21 @@ async function notifyDiscord(env: Env, row: JobRow, brief: Data): Promise<void> 
       const pico = item && typeof item === "object" && !Array.isArray(item) ? item as Data : {};
       return `${index + 1}. ${String(pico.question_text || pico.outcome || "未提供子問題")}`;
     });
-    content = `${mention}Evidence Brief\n${row.question}\n\nPICO 已整理完成：\n${lines.join("\n")}\n\n確認後開始搜尋文獻：`;
-    components = [{ type: 1, components: [{ type: 2, style: 1, label: "確認 PICO，開始搜尋", custom_id: `evidence:approve:${row.id}` }] }];
+    const preferred = minYear(brief.min_year);
+    // One click sets the window and approves, so no interaction state is needed
+    // between choosing a year and starting the search.
+    const years = [preferred, ...MIN_YEAR_CHOICES.filter(year => year !== preferred)];
+    content = `${mention}Evidence Brief\n${row.question}\n\nPICO 已整理完成：\n${lines.join("\n")}\n\n`
+      + `確認後開始搜尋文獻（預設收錄 ${preferred} 年起；成熟題目的關鍵證據常早於 2016 年）：`;
+    components = [{ type: 1, components: years.map((year, index) => ({
+      type: 2, style: index === 0 ? 1 : 2,
+      label: index === 0 ? `確認 PICO，搜尋 ${year} 年起` : `改用 ${year} 年起`,
+      custom_id: `evidence:approve:${row.id}:${year}`,
+    })) }];
+  } else if (status === "checkpoint") {
+    content = `${mention}Evidence Brief 需要你確認\n${row.question}\n\n${String(brief.message || "自動核對認為納入的研究無法回答問題。")}`
+      + `\n\n仍要以目前的文獻繼續產生摘要，請按下方按鈕；若要改搜尋策略，請回到查詢頁面。`;
+    components = [{ type: 1, components: [{ type: 2, style: 2, label: "仍然繼續產生摘要", custom_id: `evidence:checkpoint:${row.id}` }] }];
   } else if (status === "done") {
     content = `${mention}Evidence Brief 已完成\n${row.question}\n\n公開證據摘要：${publicReportUrl(env, row.id)}`;
   } else if (status === "error") {
@@ -379,25 +405,34 @@ async function discordInteraction(request: Request, env: Env): Promise<Response>
 
   const component = object(data.data, "Discord 按鈕");
   const customId = string(component.custom_id, 100, "Discord 按鈕", 1);
-  const match = customId.match(/^evidence:approve:([a-f0-9]{32})$/);
+  const match = customId.match(/^evidence:(approve|checkpoint):([a-f0-9]{32})(?::(\d{4}))?$/);
   if (!match) return interactionReply("此按鈕已失效，請重新送出查詢。", true);
-  const row = await getJob(env, match[1]);
+  const [, kind, jobId, year] = match;
+  const row = await getJob(env, jobId);
   if (row.source !== "discord" || row.discord_user_id !== userId || row.discord_channel_id !== channelId) {
     return interactionReply("這不是你的 Evidence Brief 查詢。", true);
   }
-  if (row.status !== "pico_review" || row.command !== null || row.lease_token !== null) {
+  const expected = kind === "approve" ? "pico_review" : "checkpoint";
+  if (row.status !== expected || row.command !== null || row.lease_token !== null) {
     return interactionReply("這筆查詢已經開始處理或已完成，請稍候查看最新通知。", true);
   }
   const job = snapshot(row, env);
-  const approved = await enqueue(env, row.id, "approve", { picos: job.picos });
+  if (kind === "checkpoint") {
+    const resumed = await enqueue(env, row.id, "checkpoint", { additions: [] });
+    if (resumed.status !== 202) return interactionReply("查詢目前無法接續，請稍後再試。", true);
+    return interactionReply("已確認以目前的文獻繼續產生摘要。", true);
+  }
+  const chosen = minYear(year ?? job.min_year);
+  const approved = await enqueue(env, row.id, "approve", { picos: job.picos, min_year: chosen });
   if (approved.status !== 202) return interactionReply("查詢目前無法接續，請稍後再試。", true);
-  return interactionReply("已確認 PICO，開始搜尋文獻。完成後會在此頻道通知你。", true);
+  return interactionReply(`已確認 PICO，開始搜尋 ${chosen} 年起的文獻。完成後會在此頻道通知你。`, true);
 }
 
 async function createBrief(env: Env, data: Data, discord?: DiscordContext): Promise<Response> {
   const question = string(data.question, 2000, "問題", 5), jobId = uuid(), at = timestamp();
   const job: Data = { id: jobId, question, status: "drafting", message: "已排入佇列，等待工作電腦處理…",
-    updated_at: at, picos: [], preview: [], studies: {}, gaps: {}, states: [], events: [], report_url: null };
+    updated_at: at, picos: [], preview: [], studies: {}, gaps: {}, states: [], events: [], report_url: null,
+    min_year: minYear(data.min_year) };
   const row = await env.DB.prepare(`INSERT INTO jobs
     (id, question, status, snapshot, command, created_at, updated_at, source, discord_user_id, discord_channel_id)
     SELECT ?, ?, 'drafting', ?, ?, ?, ?, ?, ?, ?
@@ -415,7 +450,8 @@ async function enqueue(env: Env, jobId: string, kind: Exclude<CommandKind, "draf
   if (!allowed.includes(row.status) || row.command !== null || row.lease_token !== null) {
     throw new HttpError("查詢狀態已變更或正在處理，請重新整理。", 409);
   }
-  const commandPayload = kind === "approve" ? { picos: validatePicos(data.picos) }
+  const commandPayload = kind === "approve"
+    ? { picos: validatePicos(data.picos), min_year: minYear(data.min_year ?? job.min_year) }
     : kind === "checkpoint" ? checkpoint(data, job) : {};
   const status = kind === "approve" ? "searching" : kind === "resume" && !(job.picos as unknown[]).length ? "drafting" : "running";
   const at = timestamp();
